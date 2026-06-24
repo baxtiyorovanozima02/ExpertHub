@@ -1,0 +1,74 @@
+// frontend/lib/types.ts
+
+export type UserRole = "admin" | "user" | "expert";
+
+export interface User {
+  id: number;
+  email: string;
+  role: UserRole;
+  is_active: boolean;
+}
+
+export interface AuthToken {
+  access_token: string;
+  token_type: "bearer";
+}
+
+export interface Category {
+  id: number;
+  name: string;
+  icon?: string | null;
+  description?: string | null;
+}
+
+export interface Expert {
+  id: number;
+  user_id: number;
+  full_name: string;
+  category_id?: number | null;
+  telegram_id?: number | null;
+  bio?: string | null;
+  is_verified: boolean;
+}
+
+export interface ExpertDocument {
+  id: number;
+  expert_id: number;
+  content: string;
+  source?: string | null;
+  created_at: string;
+}
+
+export interface Conversation {
+  id: number;
+  user_id: number;
+  category_id?: number | null;
+  created_at: string;
+}
+
+export type MessageRole = "user" | "assistant";
+
+export interface ChatMessage {
+  id: number;
+  conversation_id: number;
+  role: MessageRole;
+  content: string;
+  created_at: string;
+}
+
+export interface ChatHistory {
+  conversation: Conversation;
+  messages: ChatMessage[];
+}
+
+export interface AdminStats {
+  total_users: number;
+  total_experts: number;
+  verified_experts: number;
+  total_categories: number;
+  total_documents: number;
+}
+
+export interface ApiError {
+  detail: string;
+}
