@@ -1,5 +1,3 @@
-// frontend/app/dashboard/page.tsx
-
 "use client";
 
 import { useState } from "react";
@@ -18,8 +16,9 @@ export default function DashboardPage() {
 
   if (!isReady) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-900 border-t-transparent" />
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="aurora-bg" aria-hidden />
+        <div className="spinner" />
       </div>
     );
   }
@@ -33,54 +32,112 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
+    <div className="relative flex min-h-screen flex-col">
+      <div className="aurora-bg" aria-hidden />
+
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
-        <p className="font-semibold text-gray-900">ExpertHub</p>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500">{user?.email}</span>
-          <button
-            onClick={logout}
-            className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+      <header
+        className="relative z-10 flex items-center justify-between px-6 py-4"
+        style={{
+          background: "rgba(7,12,26,0.8)",
+          backdropFilter: "blur(20px)",
+          borderBottom: "1px solid rgba(79,142,247,0.12)",
+        }}
+      >
+        <div className="flex items-center gap-2.5">
+          <div
+            className="h-8 w-8 rounded-lg flex items-center justify-center text-white text-sm font-bold"
+            style={{ background: "linear-gradient(135deg,#4F8EF7,#6AA3FF)" }}
           >
+            E
+          </div>
+          <span
+            className="text-lg font-light"
+            style={{ fontFamily: "var(--font-display)", color: "#fff" }}
+          >
+            Expert<span style={{ color: "var(--gold)", fontWeight: 500 }}>Hub</span>
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span
+            className="text-xs hidden sm:block"
+            style={{ color: "rgba(248,250,255,0.4)" }}
+          >
+            {user?.email}
+          </span>
+          <button onClick={logout} className="btn-ghost">
             Chiqish
           </button>
         </div>
       </header>
 
-      {/* Kategoriya tanlash */}
-      <div className="border-b border-gray-200 bg-white px-6 py-3">
-        <p className="mb-2 text-xs font-medium text-gray-500">Kategoriya tanlang</p>
+      {/* Category strip */}
+      <div
+        className="relative z-10 px-6 py-3"
+        style={{
+          background: "rgba(7,12,26,0.6)",
+          backdropFilter: "blur(12px)",
+          borderBottom: "1px solid rgba(79,142,247,0.08)",
+        }}
+      >
+        <p
+          className="mb-2.5 text-xs font-medium uppercase tracking-widest"
+          style={{ color: "rgba(248,250,255,0.35)", letterSpacing: "0.1em" }}
+        >
+          Kategoriya tanlang
+        </p>
         <CategorySelect selected={categoryId} onSelect={setCategoryId} />
       </div>
 
-      {/* Chat */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Chat area */}
+      <div className="relative z-10 flex flex-1 flex-col overflow-hidden">
         <ChatWindow messages={messages} isLoading={sendMutation.isPending} />
 
-        {/* Input */}
+        {/* Input bar */}
         <form
           onSubmit={handleSend}
-          className="border-t border-gray-200 bg-white px-4 py-3"
+          className="px-4 py-4"
+          style={{
+            background: "rgba(7,12,26,0.85)",
+            backdropFilter: "blur(20px)",
+            borderTop: "1px solid rgba(79,142,247,0.12)",
+          }}
         >
-          <div className="flex gap-2">
+          <div className="flex gap-2 max-w-4xl mx-auto">
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={
                 categoryId
-                  ? "Savolingizni yozing..."
+                  ? "Savolingizni yozing…"
                   : "Avval kategoriya tanlang"
               }
               disabled={!categoryId || sendMutation.isPending}
-              className="flex-1 rounded-lg border border-gray-200 px-4 py-2.5 text-sm outline-none placeholder:text-gray-400 focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50"
+              className="field-input flex-1"
+              style={{ borderRadius: "0.85rem" }}
             />
             <button
               type="submit"
               disabled={!input.trim() || !categoryId || sendMutation.isPending}
-              className="rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+              className="btn-primary px-6"
             >
-              Yuborish
+              {sendMutation.isPending ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4" strokeDashoffset="10" />
+                  </svg>
+                  Yuborilmoqda
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  Yuborish
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </span>
+              )}
             </button>
           </div>
         </form>
