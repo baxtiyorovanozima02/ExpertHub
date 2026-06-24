@@ -1,5 +1,3 @@
-// frontend/components/admin/experts-table.tsx
-
 "use client";
 
 import { useState } from "react";
@@ -15,9 +13,12 @@ interface Props {
 export function ExpertsTable({ experts }: Props) {
   const queryClient = useQueryClient();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [verifyingId, setVerifyingId] = useState<number | null>(null);
 
   const verifyMutation = useMutation({
     mutationFn: (id: number) => verifyExpert(id),
+    onMutate: (id) => setVerifyingId(id),
+    onSettled: () => setVerifyingId(null),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-experts"] });
       queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
@@ -27,61 +28,96 @@ export function ExpertsTable({ experts }: Props) {
 
   if (experts.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-8 text-center text-sm text-gray-500">
-        Hozircha ekspertlar yo'q
+      <div
+        className="glass-card p-12 text-center"
+        style={{ color: "rgba(248,250,255,0.35)" }}
+      >
+        <div className="text-3xl mb-3">🎓</div>
+        <p className="text-sm">Hozircha ekspertlar yo'q</p>
       </div>
     );
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+    <div className="glass-card overflow-hidden">
       {errorMsg && (
-        <div className="border-b border-red-100 bg-red-50 px-4 py-2 text-sm text-red-600">
+        <div
+          className="px-5 py-3 text-sm"
+          style={{
+            background: "rgba(240,107,138,0.08)",
+            borderBottom: "1px solid rgba(240,107,138,0.2)",
+            color: "#F06B8A",
+          }}
+        >
           {errorMsg}
         </div>
       )}
-      <table className="w-full text-sm">
-        <thead className="border-b border-gray-200 bg-gray-50">
-          <tr>
-            <th className="px-4 py-3 text-left font-medium text-gray-600">Ism</th>
-            <th className="px-4 py-3 text-left font-medium text-gray-600">Kategoriya</th>
-            <th className="px-4 py-3 text-left font-medium text-gray-600">Holat</th>
-            <th className="px-4 py-3 text-left font-medium text-gray-600">Amal</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {experts.map((expert) => (
-            <tr key={expert.id} className="hover:bg-gray-50">
-              <td className="px-4 py-3 font-medium text-gray-900">{expert.full_name}</td>
-              <td className="px-4 py-3 text-gray-500">
-                {expert.category_id ? `#${expert.category_id}` : "—"}
-              </td>
-              <td className="px-4 py-3">
-                {expert.is_verified ? (
-                  <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
-                    Tasdiqlangan
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center rounded-full bg-yellow-50 px-2 py-0.5 text-xs font-medium text-yellow-700">
-                    Kutilmoqda
-                  </span>
-                )}
-              </td>
-              <td className="px-4 py-3">
-                {!expert.is_verified && (
-                  <button
-                    onClick={() => verifyMutation.mutate(expert.id)}
-                    disabled={verifyMutation.isPending}
-                    className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-700 disabled:opacity-50"
-                  >
-                    {verifyMutation.isPending ? "..." : "Tasdiqlash"}
-                  </button>
-                )}
-              </td>
+
+      <div className="overflow-x-auto">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Ism</th>
+              <th>Kategoriya</th>
+              <th>Holat</th>
+              <th>Amal</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {experts.map((expert) => (
+              <tr key={expert.id}>
+                <td>
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className="h-7 w-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
+                      style={{ background: "rgba(79,142,247,0.15)", color: "var(--electric)" }}
+                    >
+                      {expert.full_name?.charAt(0)?.toUpperCase() ?? "?"}
+                    </div>
+                    <span className="font-medium" style={{ color: "#fff" }}>
+                      {expert.full_name}
+                    </span>
+                  </div>
+                </td>
+                <td>
+                  {expert.category_id ? (
+                    <span
+                      className="font-mono text-xs px-2 py-0.5 rounded"
+                      style={{
+                        background: "rgba(79,142,247,0.08)",
+                        color: "var(--glow)",
+                      }}
+                    >
+                      #{expert.category_id}
+                    </span>
+                  ) : (
+                    <span style={{ color: "rgba(248,250,255,0.25)" }}>—</span>
+                  )}
+                </td>
+                <td>
+                  {expert.is_verified ? (
+                    <span className="badge badge-green">Tasdiqlangan</span>
+                  ) : (
+                    <span className="badge badge-yellow">Kutilmoqda</span>
+                  )}
+                </td>
+                <td>
+                  {!expert.is_verified && (
+                    <button
+                      onClick={() => verifyMutation.mutate(expert.id)}
+                      disabled={verifyMutation.isPending}
+                      className="btn-primary py-1.5 px-3 text-xs"
+                      style={{ borderRadius: "0.5rem" }}
+                    >
+                      {verifyingId === expert.id ? "…" : "Tasdiqlash"}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -1,5 +1,3 @@
-// frontend/components/chat/category-select.tsx
-
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
@@ -21,7 +19,11 @@ export function CategorySelect({ selected, onSelect }: Props) {
     return (
       <div className="flex gap-2">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-8 w-24 animate-pulse rounded-full bg-gray-200" />
+          <div
+            key={i}
+            className="h-8 w-24 animate-pulse rounded-full"
+            style={{ background: "rgba(79,142,247,0.08)" }}
+          />
         ))}
       </div>
     );
@@ -33,13 +35,11 @@ export function CategorySelect({ selected, onSelect }: Props) {
         <button
           key={cat.id}
           onClick={() => onSelect(cat.id)}
-          className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
-            selected === cat.id
-              ? "border-gray-900 bg-gray-900 text-white"
-              : "border-gray-200 bg-white text-gray-600 hover:border-gray-400"
+          className={`rounded-full px-4 py-1.5 text-sm font-medium transition-all ${
+            selected === cat.id ? "tag-active" : "tag-idle"
           }`}
         >
-          {cat.icon && <span className="mr-1">{cat.icon}</span>}
+          {cat.icon && <span className="mr-1.5">{cat.icon}</span>}
           {cat.name}
         </button>
       ))}
