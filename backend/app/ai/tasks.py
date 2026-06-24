@@ -24,6 +24,11 @@ def _embed_document(db, document_id: int, category_id):
     """
     Hujjat content ini chunklaydi va Qdrant ga saqlaydi.
     Avval eski chunklar o'chiriladi.
+
+    Har bir chunk vektori saqlangandan so'ng, ularning o'rtachasi
+    (centroid) hisoblanib, hujjatlar-kolleksiyasiga ham yoziladi.
+    Bu centroid ikki bosqichli qidiruvning 1-bosqichida (tor doirani
+    tez topish uchun) ishlatiladi - qarang: app/ai/search.py
     """
     document = db.query(ExpertDocument).filter(ExpertDocument.id == document_id).first()
     if not document or not document.content:
@@ -36,12 +41,14 @@ def _embed_document(db, document_id: int, category_id):
         qdrant_client.delete_chunk_embedding(old_chunk.id)
         db.delete(old_chunk)
     db.commit()
+    qdrant_client.delete_document_centroid(document_id)
 
     chunk_texts = split_text_into_chunks(document.content)
     if not chunk_texts:
         return 0
 
     count = 0
+    chunk_vectors = []
     for index, chunk_text in enumerate(chunk_texts):
         chunk = DocumentChunk(
             document_id=document.id,
@@ -53,6 +60,7 @@ def _embed_document(db, document_id: int, category_id):
         db.refresh(chunk)
 
         vector = generate_embedding(chunk_text)
+        chunk_vectors.append(vector)
         qdrant_client.upsert_chunk_embedding(
             chunk_id=chunk.id,
             vector=vector,
@@ -60,6 +68,13 @@ def _embed_document(db, document_id: int, category_id):
             category_id=category_id,
         )
         count += 1
+
+    if chunk_vectors:
+        qdrant_client.upsert_document_centroid(
+            document_id=document.id,
+            chunk_vectors=chunk_vectors,
+            category_id=category_id,
+        )
 
     return count
 
@@ -140,6 +155,9 @@ def parse_and_embed_document_task(self, document_id: int):
             "txt":  "text/plain",
             "doc":  "application/msword",
             "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "xls":  "application/vnd.ms-excel",
+            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "csv":  "text/csv",
             "jpg":  "image/jpeg",
             "jpeg": "image/jpeg",
             "png":  "image/png",

@@ -29,6 +29,10 @@ _CONTENT_TYPE_MAP = {
     "application/msword": DocumentFileType.document,
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": DocumentFileType.document,
     "text/plain": DocumentFileType.document,
+    "application/vnd.ms-excel": DocumentFileType.document,
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": DocumentFileType.document,
+    "text/csv": DocumentFileType.document,
+    "application/csv": DocumentFileType.document,
     "image/jpeg": DocumentFileType.image,
     "image/png": DocumentFileType.image,
     "image/webp": DocumentFileType.image,
@@ -218,6 +222,12 @@ def delete_document(
             storage.delete_file(document.file_object_name)
         except Exception as e:
             logger.warning(f"MinIO fayl o'chirishda xato: {e}")
+
+    from app.ai import qdrant_client
+    try:
+        qdrant_client.delete_document_centroid(document.id)
+    except Exception as e:
+        logger.warning(f"Qdrant centroid o'chirishda xato: {e}")
 
     db.delete(document)
     db.commit()
