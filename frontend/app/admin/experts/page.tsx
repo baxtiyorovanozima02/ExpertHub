@@ -1,5 +1,3 @@
-// frontend/app/admin/experts/page.tsx
-
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
@@ -15,14 +13,21 @@ export default function AdminExpertsPage() {
   if (isLoading) {
     return (
       <div className="flex h-40 items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-900 border-t-transparent" />
+        <div className="spinner" />
       </div>
     );
   }
 
   if (isError) {
     return (
-      <div className="rounded-lg border border-red-100 bg-red-50 p-4 text-sm text-red-600">
+      <div
+        className="rounded-xl px-5 py-4 text-sm"
+        style={{
+          background: "rgba(240,107,138,0.08)",
+          border: "1px solid rgba(240,107,138,0.2)",
+          color: "#F06B8A",
+        }}
+      >
         Ekspertlarni yuklashda xatolik yuz berdi
       </div>
     );
@@ -30,7 +35,19 @@ export default function AdminExpertsPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-xl font-semibold text-gray-900">Ekspertlar</h1>
+      <div className="mb-7 flex items-center justify-between">
+        <div>
+          <h1
+            className="text-2xl font-light"
+            style={{ fontFamily: "var(--font-display)", color: "#fff" }}
+          >
+            Ekspertlar
+          </h1>
+          <p className="mt-1 text-sm" style={{ color: "rgba(248,250,255,0.4)" }}>
+            {experts.length} ta ekspert topildi
+          </p>
+        </div>
+      </div>
       <ExpertsTable experts={experts} />
     </div>
   );
