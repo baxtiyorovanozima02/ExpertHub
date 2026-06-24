@@ -14,7 +14,6 @@ const fraunces = Fraunces({
   variable: "--font-display",
   weight: ["300", "400", "500", "700"],
   style: ["normal", "italic"],
-  axes: ["opsz"],
 });
 
 const plexMono = IBM_Plex_Mono({
