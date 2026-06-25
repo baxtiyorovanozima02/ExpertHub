@@ -1,15 +1,8 @@
-"""
-app/api/chat.py
-
-O'zgarishlar:
-  4. STREAMING — /stream endpoint qo'shildi.
-     Foydalanuvchi 3-5 soniya kutmaydi, javobni harfma-harf ko'radi.
-     Server-Sent Events (SSE) formatida uzatiladi.
-"""
-
-from fastapi import APIRouter, Depends, HTTPException
+# app/api/chat.py
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 import json
 
 from app.core.database import get_db
@@ -19,12 +12,14 @@ from app.models.message import Message
 from app.schemas.chat import (
     ConversationCreate,
     ConversationOut,
+    ConversationListOut,
     MessageCreate,
     MessageOut,
     ChatHistoryOut,
+    ConversationTitleUpdate,
 )
 from app.services.auth import get_current_user
-from app.ai.rag import generate_answer, generate_answer_stream
+from app.ai.rag import generate_answer, generate_answer_stream, generate_conversation_title
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -40,17 +35,126 @@ def _get_owned_conversation(db: Session, conversation_id: int, user: User) -> Co
     return conversation
 
 
+
 @router.post("/", response_model=ConversationOut)
 def create_conversation(
     payload: ConversationCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    conversation = Conversation(user_id=current_user.id, category_id=payload.category_id)
+    conversation = Conversation(
+        user_id=current_user.id,
+        category_id=payload.category_id,
+        title=payload.title,
+    )
     db.add(conversation)
     db.commit()
     db.refresh(conversation)
     return conversation
+
+
+@router.get("/", response_model=ConversationListOut)
+def list_conversations(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Foydalanuvchining barcha suhbatlari — oxirgisi birinchi.
+    History Page uchun ishlatiladi.
+    """
+    query = (
+        db.query(Conversation)
+        .filter(Conversation.user_id == current_user.id)
+        .order_by(Conversation.updated_at.desc())
+    )
+    total = query.count()
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
+
+    return ConversationListOut(
+        total=total,
+        page=page,
+        page_size=page_size,
+        items=items,
+    )
+
+
+@router.get("/search", response_model=ConversationListOut)
+def search_conversations(
+    q: str = Query(..., min_length=1, description="Qidiruv so'zi"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Suhbat sarlavhalari va xabarlar ichidan qidiradi.
+    History Page dagi search box uchun.
+    """
+    pattern = f"%{q}%"
+
+    matched_ids = (
+        db.query(Message.conversation_id)
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .filter(
+            Conversation.user_id == current_user.id,
+            Message.content.ilike(pattern),
+        )
+        .distinct()
+        .subquery()
+    )
+
+    query = (
+        db.query(Conversation)
+        .filter(
+            Conversation.user_id == current_user.id,
+            or_(
+                Conversation.title.ilike(pattern),
+                Conversation.id.in_(matched_ids),
+            ),
+        )
+        .order_by(Conversation.updated_at.desc())
+    )
+
+    total = query.count()
+    items = query.offset((page - 1) * page_size).limit(page_size).all()
+
+    return ConversationListOut(
+        total=total,
+        page=page,
+        page_size=page_size,
+        items=items,
+    )
+
+
+
+@router.patch("/{conversation_id}/title", response_model=ConversationOut)
+def update_title(
+    conversation_id: int,
+    payload: ConversationTitleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conversation = _get_owned_conversation(db, conversation_id, current_user)
+    conversation.title = payload.title
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+
+@router.delete("/{conversation_id}")
+def delete_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    conversation = _get_owned_conversation(db, conversation_id, current_user)
+    db.delete(conversation)
+    db.commit()
+    return {"detail": "Suhbat o'chirildi"}
+
 
 
 @router.post("/{conversation_id}/message", response_model=MessageOut)
@@ -60,11 +164,17 @@ def send_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Oddiy (bloklovchi) endpoint — barcha javob tayyorlangach qaytaradi.
-    Mavjud integratsiyalar uchun saqlab qolindi.
-    """
     conversation = _get_owned_conversation(db, conversation_id, current_user)
+
+    history = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation.id)
+        .order_by(Message.created_at)
+        .all()
+    )
+
+    if not history and not conversation.title:
+        conversation.title = generate_conversation_title(payload.content)
 
     user_message = Message(
         conversation_id=conversation.id,
@@ -78,6 +188,7 @@ def send_message(
         db,
         question=payload.content,
         category_id=conversation.category_id,
+        history=history,
     )
 
     assistant_message = Message(
@@ -89,7 +200,12 @@ def send_message(
     db.commit()
     db.refresh(assistant_message)
 
+    from sqlalchemy.sql import func
+    conversation.updated_at = func.now()
+    db.commit()
+
     return assistant_message
+
 
 
 @router.post("/{conversation_id}/stream")
@@ -99,23 +215,18 @@ async def stream_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    STREAMING endpoint — Server-Sent Events (SSE) orqali token-by-token javob.
-
-    Frontend ulash misoli (JavaScript):
-        const es = new EventSource('/api/chat/1/stream', { ... });
-        es.addEventListener('token', e => output += e.data);
-        es.addEventListener('done',  e => { const msg = JSON.parse(e.data); ... });
-        es.addEventListener('error', e => console.error(e.data));
-
-    SSE format:
-        event: token
-        data: <matn bo'lagi>\n\n
-
-        event: done
-        data: {"id": 12, "content": "...", "role": "assistant"}\n\n
-    """
     conversation = _get_owned_conversation(db, conversation_id, current_user)
+
+    history = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation.id)
+        .order_by(Message.created_at)
+        .all()
+    )
+
+    if not history and not conversation.title:
+        conversation.title = generate_conversation_title(payload.content)
+        db.commit()
 
     user_message = Message(
         conversation_id=conversation.id,
@@ -132,6 +243,7 @@ async def stream_message(
                 db,
                 question=payload.content,
                 category_id=conversation.category_id,
+                history=history,
             ):
                 full_response.append(token)
                 yield f"event: token\ndata: {json.dumps(token)}\n\n"
@@ -146,6 +258,10 @@ async def stream_message(
             db.commit()
             db.refresh(assistant_message)
 
+            from sqlalchemy.sql import func
+            conversation.updated_at = func.now()
+            db.commit()
+
             done_data = {
                 "id": assistant_message.id,
                 "conversation_id": assistant_message.conversation_id,
@@ -155,8 +271,7 @@ async def stream_message(
             yield f"event: done\ndata: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
         except Exception as exc:
-            error_msg = f"Xato yuz berdi: {str(exc)}"
-            yield f"event: error\ndata: {json.dumps(error_msg)}\n\n"
+            yield f"event: error\ndata: {json.dumps(str(exc))}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -167,6 +282,8 @@ async def stream_message(
             "X-Accel-Buffering": "no",
         },
     )
+
+
 
 
 @router.get("/{conversation_id}/history", response_model=ChatHistoryOut)

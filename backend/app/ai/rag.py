@@ -1,14 +1,4 @@
-"""
-app/ai/rag.py
-
-RAG pipeline — Reranking va yaxshilangan Prompt bilan.
-
-O'zgarishlar:
-  2. RERANKING  — Qdrant 8 chunk topadi, CrossEncoder 3 tasini tanlaydi.
-  3. PROMPT     — LLM taxmin qilmasin, ro'yxat ko'rinishida javob bersin,
-                  manba (hujjat nomi yoki fragment) aytsin.
-"""
-
+# app/ai/rag.py
 from typing import Optional, List, AsyncIterator
 from sqlalchemy.orm import Session
 from langchain_openai import ChatOpenAI
@@ -23,6 +13,8 @@ from app.models.message import Message
 
 _COARSE_TOP_K = 8
 _RERANK_TOP_K = 3
+
+_HISTORY_LIMIT = 6
 
 
 _SYSTEM_PROMPT = (
@@ -40,6 +32,7 @@ _SYSTEM_PROMPT = (
 
 _PROMPT = ChatPromptTemplate.from_messages([
     ("system", _SYSTEM_PROMPT),
+    ("placeholder", "{history}"),
     ("human", "{question}"),
 ])
 
@@ -57,12 +50,8 @@ _llm_streaming = ChatOpenAI(
     streaming=True,
 )
 
+
 def _build_context(db: Session, question: str, category_id: Optional[int]) -> str:
-    """
-    1. Qdrant dan _COARSE_TOP_K ta chunk oladi.
-    2. CrossEncoder bilan rerank qilib _RERANK_TOP_K tasini qoldiradi.
-    3. Raqamlangan manba ko'rinishida qaytaradi.
-    """
     raw_chunks = find_relevant_chunks(
         db, question, category_id=category_id, top_k=_COARSE_TOP_K
     )
@@ -74,48 +63,67 @@ def _build_context(db: Session, question: str, category_id: Optional[int]) -> st
     parts = []
     for i, chunk in enumerate(best_chunks, start=1):
         parts.append(f"[{i}-manba]\n{chunk.content}")
-
     return "\n\n".join(parts)
 
+
+def _build_history(messages: List[Message]) -> list:
+    """
+    Oxirgi _HISTORY_LIMIT ta xabarni LangChain formatiga o'tkazadi.
+    Juda ko'p xabar yuborilsa — token isrof bo'ladi, shuning uchun limit bor.
+    """
+    recent = messages[-_HISTORY_LIMIT:] if len(messages) > _HISTORY_LIMIT else messages
+    history = []
+    for m in recent:
+        if m.role == "user":
+            history.append(HumanMessage(content=m.content))
+        else:
+            history.append(AIMessage(content=m.content))
+    return history
 
 
 def generate_answer(
     db: Session,
     question: str,
     category_id: Optional[int] = None,
+    history: Optional[List[Message]] = None,
 ) -> str:
-    """
-    RAG pipeline: savol -> kontekst (rerank bilan) -> LLM -> javob.
-    """
     context = _build_context(db, question, category_id)
+    chat_history = _build_history(history) if history else []
     chain = _PROMPT | _llm
-    response = chain.invoke({"context": context, "question": question})
+    response = chain.invoke({
+        "context": context,
+        "question": question,
+        "history": chat_history,
+    })
     return response.content
+
 
 
 async def generate_answer_stream(
     db: Session,
     question: str,
     category_id: Optional[int] = None,
+    history: Optional[List[Message]] = None,
 ) -> AsyncIterator[str]:
-    """
-    Streaming RAG: har bir token kelishi bilan yield qiladi.
-    Frontend 3-5 soniya kutmaydi — harfma-harf ko'radi.
-    """
     context = _build_context(db, question, category_id)
+    chat_history = _build_history(history) if history else []
     chain = _PROMPT | _llm_streaming
 
-    async for chunk in chain.astream({"context": context, "question": question}):
+    async for chunk in chain.astream({
+        "context": context,
+        "question": question,
+        "history": chat_history,
+    }):
         if hasattr(chunk, "content") and chunk.content:
             yield chunk.content
 
 
-def build_chat_history(messages: List[Message]):
-    """Eski xabarlarni LangChain message obyektlariga aylantiradi."""
-    history = []
-    for m in messages:
-        if m.role == "user":
-            history.append(HumanMessage(content=m.content))
-        else:
-            history.append(AIMessage(content=m.content))
-    return history
+def generate_conversation_title(first_question: str) -> str:
+    """
+    Birinchi savoldan qisqa sarlavha yaratadi (History Page uchun).
+    LLM ishlatmaydi — tez va arzon: dastlabki 60 belgini oladi.
+    """
+    title = first_question.strip().replace("\n", " ")
+    if len(title) > 60:
+        title = title[:57] + "..."
+    return title
