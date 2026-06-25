@@ -1,3 +1,4 @@
+# app/schemas/expert_document.py
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -28,3 +29,18 @@ class ExpertDocumentOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class DocumentStatusOut(BaseModel):
+    """
+    Fayl qayta ishlash holati — /status va /retry endpointlari uchun.
+    """
+    id: int
+    status: str
+    message: str
+    filename: Optional[str] = None
+    chunk_count: int
+    content_length: int
+    is_ready: bool
+    has_error: bool
+    error_detail: Optional[str] = None

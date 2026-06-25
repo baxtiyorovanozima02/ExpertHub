@@ -1,20 +1,29 @@
+# app/api/expert_documents.py
 """
-app/api/expert_documents.py
+Expert Documents API
+
+Qo'shilgan yaxshilanishlar:
+  - GET /{id}/status     — kengaytirilgan status (chunk soni, fayl hajmi, qayta urinish)
+  - GET /{id}/status/stream — SSE orqali real-time progress
 """
 
 import io
 import logging
+import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+import json
 
 from app.core.database import get_db
 from app.core import storage
 from app.models.expert import Expert
 from app.models.expert_document import ExpertDocument, DocumentFileType
+from app.models.document_chunk import DocumentChunk
 from app.models.user import User
-from app.schemas.expert_document import ExpertDocumentOut
+from app.schemas.expert_document import ExpertDocumentOut, DocumentStatusOut
 from app.schemas.expert import ExpertOut
 from app.services.auth import get_current_user
 from app.ai.tasks import generate_document_embedding_task, parse_and_embed_document_task
@@ -66,7 +75,17 @@ _CONTENT_TYPE_MAP = {
     "audio/webm":  DocumentFileType.audio,
 }
 
+_STATUS_MESSAGES = {
+    "pending":    "Navbatda kutilmoqda...",
+    "parsing":    "Fayl o'qilmoqda...",
+    "chunking":   "Matn bo'laklarga bo'linmoqda...",
+    "embedding":  "AI embedding yaratilmoqda...",
+    "done":       "Tayyor! Hujjat qidiruv uchun faol.",
+    "error":      "Xato yuz berdi.",
+}
+
 _MAX_FILE_SIZE = 20 * 1024 * 1024
+
 
 
 def _get_current_expert(db: Session, current_user: User) -> Expert:
@@ -89,12 +108,38 @@ def _with_file_url(document: ExpertDocument) -> ExpertDocumentOut:
     return out
 
 
+def _build_status(document: ExpertDocument, db: Session) -> dict:
+    """
+    Hujjat holati haqida to'liq ma'lumot yig'adi.
+    Polling va SSE ikkalasida ishlatiladi.
+    """
+    status = document.parse_status or "pending"
+    chunk_count = (
+        db.query(DocumentChunk)
+        .filter(DocumentChunk.document_id == document.id)
+        .count()
+    )
+    content_length = len(document.content) if document.content else 0
+
+    return {
+        "id":             document.id,
+        "status":         status,
+        "message":        _STATUS_MESSAGES.get(status, status),
+        "filename":       document.original_filename,
+        "chunk_count":    chunk_count,
+        "content_length": content_length,
+        "is_ready":       status == "done",
+        "has_error":      status == "error",
+        "error_detail":   document.parse_error if status == "error" else None,
+    }
+
+
+
 @router.get("/me", response_model=ExpertOut)
 def get_my_profile(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Joriy ekspertning profilini qaytaradi."""
     expert = _get_current_expert(db, current_user)
     return expert
 
@@ -104,7 +149,6 @@ def get_my_documents(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Ekspertning barcha hujjatlarini qaytaradi."""
     expert = _get_current_expert(db, current_user)
     documents = (
         db.query(ExpertDocument)
@@ -115,13 +159,28 @@ def get_my_documents(
     return [_with_file_url(doc) for doc in documents]
 
 
-@router.get("/{document_id}/status")
+
+@router.get("/{document_id}/status", response_model=DocumentStatusOut)
 def get_document_status(
     document_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Fayl parse holati."""
+    """
+    Fayl qayta ishlash holati — polling uchun.
+
+    Frontend har 2-3 soniyada shu endpointga murojaat qilib
+    progress bar yoki status badge yangilaydi.
+
+    Response:
+        status:         pending | parsing | chunking | embedding | done | error
+        message:        User-friendly o'zbek tili xabari
+        chunk_count:    Nechta bo'lak yaratildi (done bo'lganda)
+        content_length: Nechta belgi matn chiqarildi
+        is_ready:       true bo'lsa — hujjat qidiruvga tayyor
+        has_error:      true bo'lsa — error_detail ni ko'rsat
+        error_detail:   Xato matni (faqat has_error=true da)
+    """
     expert = _get_current_expert(db, current_user)
     document = db.query(ExpertDocument).filter(
         ExpertDocument.id == document_id,
@@ -130,13 +189,129 @@ def get_document_status(
     if not document:
         raise HTTPException(status_code=404, detail="Hujjat topilmadi")
 
-    return {
-        "id": document.id,
-        "parse_status": getattr(document, "parse_status", "unknown"),
-        "parse_error": getattr(document, "parse_error", None),
-        "has_content": bool(document.content and document.content.strip()),
-        "filename": document.original_filename,
-    }
+    return _build_status(document, db)
+
+
+
+@router.get("/{document_id}/status/stream")
+async def stream_document_status(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Real-time fayl qayta ishlash holati — Server-Sent Events orqali.
+
+    Fayl yuklanishi bilanoq frontend shu endpointga ulanadi va
+    hech qanday polling qilmasdan avtomatik yangilanishlarni oladi.
+    done yoki error holati kelganda stream avtomatik yopiladi.
+
+    SSE formatida keladi:
+        event: status
+        data: {"status": "parsing", "message": "Fayl o'qilmoqda...", ...}
+
+        event: status
+        data: {"status": "done", "chunk_count": 24, "is_ready": true, ...}
+
+    Frontend ulash misoli (JavaScript):
+        const es = new EventSource(`/api/expert/documents/${id}/status/stream`);
+        es.addEventListener('status', e => {
+            const data = JSON.parse(e.data);
+            updateProgressBar(data);
+            if (data.is_ready || data.has_error) es.close();
+        });
+    """
+    expert = _get_current_expert(db, current_user)
+    document = db.query(ExpertDocument).filter(
+        ExpertDocument.id == document_id,
+        ExpertDocument.expert_id == expert.id,
+    ).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
+
+    async def event_generator():
+        max_wait_seconds = 600
+        poll_interval   = 2.0
+        elapsed         = 0
+        last_status     = None
+
+        while elapsed < max_wait_seconds:
+            db.expire(document)
+            db.refresh(document)
+
+            status_data = _build_status(document, db)
+            current_status = status_data["status"]
+
+            if current_status != last_status:
+                payload = json.dumps(status_data, ensure_ascii=False)
+                yield f"event: status\ndata: {payload}\n\n"
+                last_status = current_status
+
+            if current_status in ("done", "error"):
+                break
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+        if last_status not in ("done", "error"):
+            timeout_data = {
+                **_build_status(document, db),
+                "status":  "error",
+                "message": "Kutish vaqti tugadi. Sahifani yangilang.",
+                "has_error": True,
+            }
+            yield f"event: status\ndata: {json.dumps(timeout_data, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control":    "no-cache",
+            "Connection":       "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+
+@router.post("/{document_id}/retry", response_model=DocumentStatusOut)
+def retry_document_processing(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Xato bo'lgan hujjatni qayta parse qiladi.
+    Faqat status=error bo'lgan hujjatlarda ishlaydi.
+    """
+    expert = _get_current_expert(db, current_user)
+    document = db.query(ExpertDocument).filter(
+        ExpertDocument.id == document_id,
+        ExpertDocument.expert_id == expert.id,
+    ).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Hujjat topilmadi")
+
+    if document.parse_status not in ("error", "pending"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Faqat xato yoki kutishdagi hujjatlarni qayta ishga tushirish mumkin. "
+                   f"Joriy holat: {document.parse_status}"
+        )
+
+    document.parse_status = "pending"
+    document.parse_error  = None
+    document.content      = None
+    db.commit()
+
+    if document.file_object_name:
+        parse_and_embed_document_task.delay(document.id)
+    else:
+        generate_document_embedding_task.delay(document.id)
+
+    logger.info(f"Hujjat #{document_id} qayta ishga tushirildi.")
+    return _build_status(document, db)
+
 
 
 @router.post("/upload", response_model=ExpertDocumentOut)
@@ -147,7 +322,6 @@ async def upload_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Fayl yuklaydi (PDF / rasm / audio / Word / TXT)."""
     expert = _get_current_expert(db, current_user)
 
     file_type = _CONTENT_TYPE_MAP.get(file.content_type)
@@ -201,7 +375,6 @@ def add_text_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Matnni to'g'ridan-to'g'ri kiritish."""
     if not content.strip():
         raise HTTPException(status_code=400, detail="Matn bo'sh bo'lmasligi kerak")
 
@@ -231,7 +404,6 @@ def delete_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Hujjatni va MinIO dagi faylni o'chiradi."""
     expert = _get_current_expert(db, current_user)
     document = db.query(ExpertDocument).filter(
         ExpertDocument.id == document_id,

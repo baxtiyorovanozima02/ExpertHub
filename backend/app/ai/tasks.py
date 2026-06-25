@@ -1,9 +1,13 @@
+# app/ai/tasks.py
 """
-app/ai/tasks.py
+Celery tasklar — parse_status yangilanishi qo'shildi.
 
-Celery tasklar:
-  1. generate_document_embedding_task  — mavjud task (o'zgarmadi)
-  2. parse_and_embed_document_task     — YANGI: fayl → matn → embed
+Har bir bosqichda parse_status yangilanadi:
+  pending -> parsing -> chunking -> embedding -> done
+                                              -> error
+
+Bu holat /status va /status/stream endpointlari orqali
+frontend ga real-time uzatiladi.
 """
 
 from celery_worker import celery_app
@@ -20,19 +24,24 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _set_status(db, document: ExpertDocument, status: str, error: str = None):
+    """Hujjat statusini yangilash — bir joyda, xatosiz."""
+    document.parse_status = status
+    if error is not None:
+        document.parse_error = error[:500]
+    db.commit()
+
+
 def _embed_document(db, document_id: int, category_id):
     """
-    Hujjat content ini chunklaydi va Qdrant ga saqlaydi.
-    Avval eski chunklar o'chiriladi.
-
-    Har bir chunk vektori saqlangandan so'ng, ularning o'rtachasi
-    (centroid) hisoblanib, hujjatlar-kolleksiyasiga ham yoziladi.
-    Bu centroid ikki bosqichli qidiruvning 1-bosqichida (tor doirani
-    tez topish uchun) ishlatiladi - qarang: app/ai/search.py
+    Hujjatni chunklaydi va Qdrant ga saqlaydi.
+    Har bir bosqichda parse_status yangilanadi.
     """
     document = db.query(ExpertDocument).filter(ExpertDocument.id == document_id).first()
     if not document or not document.content:
         return 0
+
+    _set_status(db, document, "chunking")
 
     old_chunks = db.query(DocumentChunk).filter(
         DocumentChunk.document_id == document_id
@@ -46,6 +55,8 @@ def _embed_document(db, document_id: int, category_id):
     chunk_texts = split_text_into_chunks(document.content)
     if not chunk_texts:
         return 0
+
+    _set_status(db, document, "embedding")
 
     count = 0
     chunk_vectors = []
@@ -79,13 +90,12 @@ def _embed_document(db, document_id: int, category_id):
     return count
 
 
-
 @celery_app.task(name="generate_document_embedding")
 def generate_document_embedding_task(document_id: int):
     """
     Hujjat content i allaqachon to'ldirilgan bo'lsa
-    (masalan, Telegram bot orqali kiritilgan matn),
-    to'g'ridan-to'g'ri chunk + embed qiladi.
+    (masalan, matn orqali kiritilgan), to'g'ridan-to'g'ri
+    chunk + embed qiladi.
     """
     db = SessionLocal()
     try:
@@ -99,19 +109,33 @@ def generate_document_embedding_task(document_id: int):
         category_id = expert.category_id if expert else None
 
         count = _embed_document(db, document_id, category_id)
+
+        _set_status(db, document, "done")
         return f"Hujjat #{document_id} uchun {count} ta chunk va embedding saqlandi"
+
+    except Exception as exc:
+        logger.error(f"Hujjat #{document_id} embedding xatosi: {exc}")
+        try:
+            document = db.query(ExpertDocument).filter(
+                ExpertDocument.id == document_id
+            ).first()
+            if document:
+                _set_status(db, document, "error", str(exc))
+        except Exception:
+            pass
+        raise
     finally:
         db.close()
-
 
 
 @celery_app.task(name="parse_and_embed_document", bind=True, max_retries=2)
 def parse_and_embed_document_task(self, document_id: int):
     """
-    1. MinIO dan faylni yuklab oladi
-    2. Fayl turiga qarab matn chiqaradi (PDF / rasm / audio)
-    3. Chiqarilgan matnni ExpertDocument.content ga saqlaydi
-    4. Chunk + embed qiladi
+    1. MinIO dan faylni yuklab oladi         -> status: parsing
+    2. Fayl turiga qarab matn chiqaradi
+    3. Chiqarilgan matnni DBga saqlaydi
+    4. Chunk + embed qiladi                  -> status: chunking -> embedding
+    5. Yakunlaydi                            -> status: done | error
     """
     from app.core import storage
     from app.ai.file_parser import parse_file
@@ -131,6 +155,8 @@ def parse_and_embed_document_task(self, document_id: int):
             logger.info(f"Hujjat #{document_id} allaqachon parse qilingan, o'tkazildi")
             return f"Hujjat #{document_id} allaqachon matn bor"
 
+        _set_status(db, document, "parsing")
+
         logger.info(f"MinIO dan yuklanmoqda: {document.file_object_name}")
         minio_client = storage.get_client()
         from app.core.config import settings
@@ -143,10 +169,6 @@ def parse_and_embed_document_task(self, document_id: int):
         response.close()
         response.release_conn()
 
-        content_type = (
-            document.file_type.value if hasattr(document.file_type, "value")
-            else str(document.file_type)
-        )
         filename = document.original_filename or "file"
         ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
@@ -192,7 +214,6 @@ def parse_and_embed_document_task(self, document_id: int):
         extracted_text = parse_file(file_bytes, detected_ct, filename)
 
         document.content = extracted_text
-        document.parse_status = "done"
         db.commit()
         logger.info(f"Hujjat #{document_id}: {len(extracted_text)} belgi chiqarildi")
 
@@ -200,6 +221,8 @@ def parse_and_embed_document_task(self, document_id: int):
         category_id = expert.category_id if expert else None
 
         count = _embed_document(db, document_id, category_id)
+
+        _set_status(db, document, "done")
         return (
             f"Hujjat #{document_id}: matn chiqarildi ({len(extracted_text)} belgi), "
             f"{count} ta chunk saqlandi"
@@ -212,9 +235,7 @@ def parse_and_embed_document_task(self, document_id: int):
                 ExpertDocument.id == document_id
             ).first()
             if document:
-                document.parse_status = "error"
-                document.parse_error = str(exc)[:500]
-                db.commit()
+                _set_status(db, document, "error", str(exc))
         except Exception:
             pass
         raise self.retry(exc=exc, countdown=30)
