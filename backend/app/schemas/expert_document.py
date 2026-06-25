@@ -23,6 +23,8 @@ class ExpertDocumentOut(BaseModel):
     file_type: DocumentFileType
     original_filename: Optional[str] = None
     file_url: Optional[str] = None
+    parse_status: Optional[str] = None
+    parse_error: Optional[str] = None
 
     class Config:
         from_attributes = True

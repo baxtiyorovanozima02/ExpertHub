@@ -18,6 +18,7 @@ from app.schemas.expert_document import ExpertDocumentOut
 from app.schemas.expert import ExpertOut
 from app.services.auth import get_current_user
 from app.ai.tasks import generate_document_embedding_task, parse_and_embed_document_task
+from app.ai import qdrant_client
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +224,6 @@ def delete_document(
         except Exception as e:
             logger.warning(f"MinIO fayl o'chirishda xato: {e}")
 
-    from app.ai import qdrant_client
     try:
         qdrant_client.delete_document_centroid(document.id)
     except Exception as e:

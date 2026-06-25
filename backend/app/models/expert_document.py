@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, Text
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import enum
@@ -27,5 +27,8 @@ class ExpertDocument(Base):
     file_type = Column(Enum(DocumentFileType), default=DocumentFileType.text, nullable=False)
     file_object_name = Column(String, nullable=True)
     original_filename = Column(String, nullable=True)
+
+    parse_status = Column(String(20), nullable=True, server_default="pending")
+    parse_error = Column(Text, nullable=True)
 
     expert = relationship("Expert", backref="documents")
