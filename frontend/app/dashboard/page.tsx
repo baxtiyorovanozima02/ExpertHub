@@ -11,6 +11,7 @@ export default function DashboardPage() {
   const { isReady, user } = useRequireAuth({ allowedRoles: ["user"] });
   const logout = useLogout();
   const [input, setInput] = useState("");
+  const [inputFocused, setInputFocused] = useState(false);
 
   const { messages, categoryId, setCategoryId, sendMutation } = useChatConversation();
 
@@ -35,6 +36,31 @@ export default function DashboardPage() {
     <div className="relative flex min-h-screen flex-col">
       <div className="aurora-bg" aria-hidden />
 
+      {/* Decorative floating glow orbs for extra depth */}
+      <div
+        className="glow-orb"
+        aria-hidden
+        style={{
+          top: "8%",
+          left: "8%",
+          width: "260px",
+          height: "260px",
+          background: "rgba(79,142,247,0.16)",
+        }}
+      />
+      <div
+        className="glow-orb"
+        aria-hidden
+        style={{
+          bottom: "4%",
+          right: "6%",
+          width: "300px",
+          height: "300px",
+          background: "rgba(240,168,67,0.10)",
+          animationDelay: "2s",
+        }}
+      />
+
       {/* Header */}
       <header
         className="relative z-10 flex items-center justify-between px-6 py-4"
@@ -46,7 +72,7 @@ export default function DashboardPage() {
       >
         <div className="flex items-center gap-2.5">
           <div
-            className="h-8 w-8 rounded-lg flex items-center justify-center text-white text-sm font-bold"
+            className="h-8 w-8 rounded-lg flex items-center justify-center text-white text-sm font-bold avatar-glow"
             style={{ background: "linear-gradient(135deg,#4F8EF7,#6AA3FF)" }}
           >
             E
@@ -61,9 +87,10 @@ export default function DashboardPage() {
 
         <div className="flex items-center gap-3">
           <span
-            className="text-xs hidden sm:block"
+            className="text-xs hidden sm:flex items-center gap-1.5"
             style={{ color: "rgba(248,250,255,0.4)" }}
           >
+            <span className="status-dot" />
             {user?.email}
           </span>
           <button onClick={logout} className="btn-ghost">
@@ -105,18 +132,22 @@ export default function DashboardPage() {
           }}
         >
           <div className="flex gap-2 max-w-4xl mx-auto">
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={
-                categoryId
-                  ? "Savolingizni yozing…"
-                  : "Avval kategoriya tanlang"
-              }
-              disabled={!categoryId || sendMutation.isPending}
-              className="field-input flex-1"
-              style={{ borderRadius: "0.85rem" }}
-            />
+            <div className={`input-glow-wrap flex-1 ${inputFocused ? "focused" : ""}`}>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onFocus={() => setInputFocused(true)}
+                onBlur={() => setInputFocused(false)}
+                placeholder={
+                  categoryId
+                    ? "Savolingizni yozing…"
+                    : "Avval kategoriya tanlang"
+                }
+                disabled={!categoryId || sendMutation.isPending}
+                className="field-input w-full"
+                style={{ borderRadius: "0.85rem" }}
+              />
+            </div>
             <button
               type="submit"
               disabled={!input.trim() || !categoryId || sendMutation.isPending}

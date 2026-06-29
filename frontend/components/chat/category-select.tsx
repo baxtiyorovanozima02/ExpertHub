@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchCategories } from "@/lib/api/chat";
 import type { Category } from "@/lib/types";
@@ -14,6 +15,14 @@ export function CategorySelect({ selected, onSelect }: Props) {
     queryKey: ["categories"],
     queryFn: fetchCategories,
   });
+
+  const [poppedId, setPoppedId] = useState<number | null>(null);
+
+  function handleSelect(id: number) {
+    onSelect(id);
+    setPoppedId(id);
+    setTimeout(() => setPoppedId(null), 350);
+  }
 
   if (isLoading) {
     return (
@@ -31,13 +40,14 @@ export function CategorySelect({ selected, onSelect }: Props) {
 
   return (
     <div className="flex flex-wrap gap-2">
-      {categories.map((cat: Category) => (
+      {categories.map((cat: Category, index: number) => (
         <button
           key={cat.id}
-          onClick={() => onSelect(cat.id)}
-          className={`rounded-full px-4 py-1.5 text-sm font-medium transition-all ${
+          onClick={() => handleSelect(cat.id)}
+          className={`rounded-full px-4 py-1.5 text-sm font-medium transition-all pill-in ${
             selected === cat.id ? "tag-active" : "tag-idle"
-          }`}
+          } ${poppedId === cat.id ? "pill-pop" : ""}`}
+          style={{ animationDelay: `${index * 45}ms` }}
         >
           {cat.icon && <span className="mr-1.5">{cat.icon}</span>}
           {cat.name}
