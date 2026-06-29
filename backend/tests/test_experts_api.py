@@ -73,7 +73,6 @@ def sample_expert(db_session, sample_user):
     return expert
 
 
-
 class TestGetExperts:
     def test_empty_list_on_fresh_db(self, client):
         response = client.get("/api/experts/")

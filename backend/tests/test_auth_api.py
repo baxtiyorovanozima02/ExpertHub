@@ -354,7 +354,6 @@ class TestGetMeEndpoint:
 
     def test_get_me_returns_correct_role(self, client):
         token = self._get_token(client, "expert@test.com", "pass")
-        # Role ni tekshirish
         response = client.get(
             "/api/auth/me",
             headers={"Authorization": f"Bearer {token}"}

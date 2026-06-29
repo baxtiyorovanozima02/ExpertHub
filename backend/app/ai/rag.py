@@ -3,19 +3,19 @@
 RAG pipeline — Query Preprocessing, Chunk Source Tracking,
 Multi-language, Reranking, Conversation History, Streaming.
 
-Yangiliklar (1-tur):
-  #4 Query preprocessing  — qisqa/noaniq savollar boyitiladi
-  #5 Chunk source tracking — javobda hujjat nomi ko'rsatiladi
-  #8 Multi-language        — til aniqlanib, shu tilda javob beriladi
+  #4 Query preprocessing        — qisqa/noaniq savollar boyitiladi
+  #5 Chunk source tracking      — javobda hujjat nomi ko'rsatiladi
+  #8 Multi-language             — til aniqlanib, shu tilda javob beriladi
+  #6 Conversation summarization — 20+ xabarda eski xabarlar xulosaga aylantiriladi
+  #9 Fallback LLM               — OpenAI ishlamasa Claude/Gemini ga o'tadi
 """
 
 from typing import Optional, List, AsyncIterator
 from sqlalchemy.orm import Session
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
-from app.core.config import settings
+from app.ai.llm_router import get_llm          # ← yangi: fallback LLM
 from app.ai.search import find_relevant_chunks
 from app.ai.reranking import rerank_chunks
 from app.ai.query_preprocessor import expand_query, detect_language
@@ -24,9 +24,10 @@ from app.models.document_chunk import DocumentChunk
 from app.models.expert_document import ExpertDocument
 
 
-_COARSE_TOP_K  = 8
-_RERANK_TOP_K  = 3
-_HISTORY_LIMIT = 6
+_COARSE_TOP_K        = 8
+_RERANK_TOP_K        = 3
+_SUMMARIZE_THRESHOLD = 20
+_RECENT_KEEP         = 6
 
 
 _SYSTEM_PROMPTS = {
@@ -68,6 +69,24 @@ _SYSTEM_PROMPTS = {
     ),
 }
 
+_SUMMARY_PROMPTS = {
+    "uz": (
+        "Quyidagi suhbat tarixini QISQA va IXCHAM xulosa qil (3-5 gap). "
+        "Faqat muhim faktlarni, kontekstni va foydalanuvchi haqidagi ma'lumotlarni saqla. "
+        "Xulosa o'zbek tilida bo'lsin.\n\nSUHBAT:\n{history}"
+    ),
+    "ru": (
+        "Сделай КРАТКОЕ и СЖАТОЕ резюме следующей истории разговора (3-5 предложений). "
+        "Сохрани только важные факты, контекст и информацию о пользователе. "
+        "Резюме должно быть на русском языке.\n\nИСТОРИЯ:\n{history}"
+    ),
+    "en": (
+        "Summarize the following conversation history BRIEFLY and CONCISELY (3-5 sentences). "
+        "Keep only important facts, context, and user information. "
+        "The summary must be in English.\n\nHISTORY:\n{history}"
+    ),
+}
+
 
 def _get_prompt(lang: str) -> ChatPromptTemplate:
     system = _SYSTEM_PROMPTS.get(lang, _SYSTEM_PROMPTS["uz"])
@@ -78,27 +97,7 @@ def _get_prompt(lang: str) -> ChatPromptTemplate:
     ])
 
 
-
-_llm = ChatOpenAI(
-    model="gpt-4o-mini",
-    api_key=settings.OPENAI_API_KEY,
-    temperature=0.2,
-)
-
-_llm_streaming = ChatOpenAI(
-    model="gpt-4o-mini",
-    api_key=settings.OPENAI_API_KEY,
-    temperature=0.2,
-    streaming=True,
-)
-
-
-
 def _get_source_name(chunk: DocumentChunk, db: Session) -> str:
-    """
-    Chunk ga tegishli hujjat nomini qaytaradi.
-    original_filename bo'lmasa — source yoki 'Noma'lum manba'.
-    """
     try:
         doc = db.query(ExpertDocument).filter(
             ExpertDocument.id == chunk.document_id
@@ -111,11 +110,6 @@ def _get_source_name(chunk: DocumentChunk, db: Session) -> str:
 
 
 def _build_context(db: Session, question: str, category_id: Optional[int]) -> str:
-    """
-    1. Qdrant dan raw chunklar oladi
-    2. CrossEncoder bilan rerank qiladi
-    3. Har bir chunk oldiga hujjat nomini qo'shadi  ← #5
-    """
     raw_chunks = find_relevant_chunks(
         db, question, category_id=category_id, top_k=_COARSE_TOP_K
     )
@@ -132,16 +126,44 @@ def _build_context(db: Session, question: str, category_id: Optional[int]) -> st
     return "\n\n".join(parts)
 
 
-def _build_history(messages: List[Message]) -> list:
-    recent = messages[-_HISTORY_LIMIT:] if len(messages) > _HISTORY_LIMIT else messages
-    history = []
-    for m in recent:
+def _summarize_messages(messages: List[Message], lang: str) -> str:
+    history_text = "\n".join(
+        f"{'Foydalanuvchi' if m.role == 'user' else 'Assistent'}: {m.content}"
+        for m in messages
+    )
+    prompt_text = _SUMMARY_PROMPTS.get(lang, _SUMMARY_PROMPTS["uz"]).format(
+        history=history_text
+    )
+    llm = get_llm(streaming=False)
+    response = llm.invoke([HumanMessage(content=prompt_text)])
+    return response.content.strip()
+
+
+def _build_history(messages: List[Message], lang: str = "uz") -> list:
+    if len(messages) <= _SUMMARIZE_THRESHOLD:
+        history = []
+        for m in messages:
+            if m.role == "user":
+                history.append(HumanMessage(content=m.content))
+            else:
+                history.append(AIMessage(content=m.content))
+        return history
+
+    old_messages    = messages[:-_RECENT_KEEP]
+    recent_messages = messages[-_RECENT_KEEP:]
+
+    summary = _summarize_messages(old_messages, lang)
+
+    history = [
+        SystemMessage(content=f"[Oldingi suhbat xulosasi]\n{summary}")
+    ]
+    for m in recent_messages:
         if m.role == "user":
             history.append(HumanMessage(content=m.content))
         else:
             history.append(AIMessage(content=m.content))
-    return history
 
+    return history
 
 
 def generate_answer(
@@ -150,14 +172,14 @@ def generate_answer(
     category_id: Optional[int] = None,
     history: Optional[List[Message]] = None,
 ) -> str:
-    expanded_q = expand_query(question, history)
-
-    lang = detect_language(question)
-
+    expanded_q   = expand_query(question, history)
+    lang         = detect_language(question)
     context      = _build_context(db, expanded_q, category_id)
-    chat_history = _build_history(history) if history else []
+    chat_history = _build_history(history, lang) if history else []
     prompt       = _get_prompt(lang)
-    chain        = prompt | _llm
+
+    llm   = get_llm(streaming=False)
+    chain = prompt | llm
 
     response = chain.invoke({
         "context":  context,
@@ -176,9 +198,11 @@ async def generate_answer_stream(
     expanded_q   = expand_query(question, history)
     lang         = detect_language(question)
     context      = _build_context(db, expanded_q, category_id)
-    chat_history = _build_history(history) if history else []
+    chat_history = _build_history(history, lang) if history else []
     prompt       = _get_prompt(lang)
-    chain        = prompt | _llm_streaming
+
+    llm   = get_llm(streaming=True)
+    chain = prompt | llm
 
     async for chunk in chain.astream({
         "context":  context,

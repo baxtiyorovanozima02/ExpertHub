@@ -1,4 +1,3 @@
-# app/api/chat.py
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -300,3 +299,71 @@ def get_history(
         .all()
     )
     return ChatHistoryOut(conversation=conversation, messages=messages)
+
+
+
+from app.schemas.chat import MessageFeedback  # noqa: E402 (append import)
+
+
+@router.post("/{conversation_id}/messages/{message_id}/feedback", response_model=MessageOut)
+def set_message_feedback(
+    conversation_id: int,
+    message_id: int,
+    payload: MessageFeedback,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    #7 Feedback sistema: foydalanuvchi 👍 (1) yoki 👎 (-1) bosadi.
+    Faqat o'z suhbatiga tegishli assistant xabarlarga feedback berish mumkin.
+    """
+    conversation = _get_owned_conversation(db, conversation_id, current_user)
+
+    message = (
+        db.query(Message)
+        .filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation.id,
+        )
+        .first()
+    )
+    if not message:
+        raise HTTPException(status_code=404, detail="Xabar topilmadi")
+
+    if message.role != "assistant":
+        raise HTTPException(
+            status_code=400,
+            detail="Feedback faqat assistant xabarlariga berilishi mumkin",
+        )
+
+    message.feedback = payload.value
+    db.commit()
+    db.refresh(message)
+    return message
+
+
+@router.delete("/{conversation_id}/messages/{message_id}/feedback", response_model=MessageOut)
+def remove_message_feedback(
+    conversation_id: int,
+    message_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Feedbackni olib tashlash (NULL ga qaytarish)."""
+    conversation = _get_owned_conversation(db, conversation_id, current_user)
+
+    message = (
+        db.query(Message)
+        .filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation.id,
+        )
+        .first()
+    )
+    if not message:
+        raise HTTPException(status_code=404, detail="Xabar topilmadi")
+
+    message.feedback = None
+    db.commit()
+    db.refresh(message)
+    return message

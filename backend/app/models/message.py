@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, SmallInteger
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -10,4 +10,5 @@ class Message(Base):
     conversation_id = Column(Integer, ForeignKey("conversations.id"), nullable=False)
     role = Column(String, nullable=False)
     content = Column(String, nullable=False)
+    feedback = Column(SmallInteger, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

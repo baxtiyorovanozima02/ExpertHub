@@ -177,5 +177,4 @@ class TestGenerateEmbedding:
             generate_embedding("A")
             generate_embedding("B")
             generate_embedding("C")
-        # get_model har safar chaqiriladi, lekin ichida _model cache bor
         assert mock_get_model.call_count == 3

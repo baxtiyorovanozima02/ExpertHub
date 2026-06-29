@@ -1,4 +1,3 @@
-# app/api/expert_documents.py
 """
 Expert Documents API
 

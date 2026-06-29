@@ -248,8 +248,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["awaiting_category"] = True
         context.user_data["pending_name"] = expert.full_name
-        context.user_data["changing_category"] = True  # yangi: o'zgartirish rejimi
-
+        context.user_data["changing_category"] = True
         await update.message.reply_text(
             f"Hozirgi kasb yo'nalishingiz: {current_label}\n\n"
             "Yangi kasb yo'nalishini tanlang:",

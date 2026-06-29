@@ -1,5 +1,5 @@
 # app/schemas/chat.py
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from datetime import datetime
 
@@ -41,6 +41,7 @@ class MessageOut(BaseModel):
     conversation_id: int
     role: str
     content: str
+    feedback: Optional[int] = None
     created_at: datetime
 
     class Config:
@@ -50,3 +51,15 @@ class MessageOut(BaseModel):
 class ChatHistoryOut(BaseModel):
     conversation: ConversationOut
     messages: List[MessageOut]
+
+
+class MessageFeedback(BaseModel):
+    """Feedback: 1 = thumbs up, -1 = thumbs down"""
+    value: int
+
+    @field_validator("value")
+    @classmethod
+    def validate_value(cls, v: int) -> int:
+        if v not in (1, -1):
+            raise ValueError("Feedback qiymati faqat 1 (👍) yoki -1 (👎) bo'lishi mumkin")
+        return v
