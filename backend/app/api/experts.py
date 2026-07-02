@@ -4,11 +4,27 @@ from typing import List
 
 from app.core.database import get_db
 from app.models.expert import Expert
+from app.models.category import Category
 from app.models.user import User, UserRole
 from app.schemas.expert import ExpertCreate, ExpertUpdate, ExpertOut
 from app.services.auth import get_current_user
 
 router = APIRouter(prefix="/api/experts", tags=["experts"])
+
+
+def _validate_category(db: Session, category_id: int | None) -> None:
+    """
+    category_id berilgan bo'lsa, u categories jadvalida mavjudligini tekshiradi.
+    Aks holda tushunarli 400 xatolik qaytaradi (500 o'rniga).
+    """
+    if category_id is None:
+        return
+    category = db.query(Category).filter(Category.id == category_id).first()
+    if not category:
+        raise HTTPException(
+            status_code=400,
+            detail=f"category_id={category_id} bilan kategoriya mavjud emas",
+        )
 
 
 def _get_owned_expert(db: Session, expert_id: int, current_user: User) -> Expert:
@@ -54,6 +70,8 @@ def create_expert(
             detail="Siz uchun allaqachon ekspert profili yaratilgan",
         )
 
+    _validate_category(db, data.category_id)
+
     expert = Expert(user_id=current_user.id, **data.model_dump())
     db.add(expert)
     db.commit()
@@ -73,6 +91,9 @@ def update_expert(
     update_data = data.model_dump(exclude_unset=True)
 
     update_data.pop("is_verified", None)
+
+    if "category_id" in update_data:
+        _validate_category(db, update_data["category_id"])
 
     for key, value in update_data.items():
         setattr(expert, key, value)
