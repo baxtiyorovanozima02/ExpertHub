@@ -4,14 +4,15 @@ import bcrypt
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.models.user import User, UserRole
 from app.core.config import settings
 from app.core.database import get_db
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+oauth2_scheme = HTTPBearer()
 
 
 def _prepare_password(password: str) -> bytes:
@@ -58,9 +59,10 @@ def login_user(db: Session, email: str, password: str):
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
+    token = credentials.credentials
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Token yaroqsiz yoki muddati o'tgan",
