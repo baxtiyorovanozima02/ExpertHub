@@ -22,7 +22,7 @@ class ExpertDocument(Base):
     content = Column(String, nullable=True)
 
     source = Column(String, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), default=func.now(), server_default=func.now(), nullable=False)
 
     file_type = Column(Enum(DocumentFileType), default=DocumentFileType.text, nullable=False)
     file_object_name = Column(String, nullable=True)
