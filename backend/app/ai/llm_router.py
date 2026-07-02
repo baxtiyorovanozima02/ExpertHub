@@ -65,7 +65,7 @@ def _make_gemini_llm(streaming: bool = False):
     except ImportError:
         raise RuntimeError("langchain-google-genai o'rnatilmagan: pip install langchain-google-genai")
     return ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemini-2.5-flash",
         google_api_key=settings.GEMINI_API_KEY,
         temperature=0.2,
         streaming=streaming,
