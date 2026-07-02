@@ -7,7 +7,7 @@ from app.api.expert_documents import router as expert_documents_router
 from app.api.admin import router as admin_router
 from app.api.chat import router as chat_router
 
-app = FastAPI(title="ExpertHub API", version="1.0.0")
+app = FastAPI(title="ExpertHub API", version="1.0.0", debug=True)
 
 app.add_middleware(
     CORSMiddleware,

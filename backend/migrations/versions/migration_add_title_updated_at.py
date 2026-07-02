@@ -2,7 +2,7 @@
 """add title and updated_at to conversations
 
 Revision ID: a1b2c3d4e5f6
-Revises: c3a1f5e7d9b2
+Revises: g7h8i9j0k1l2
 Create Date: 2026-06-25
 
 """
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = 'a1b2c3d4e5f6'
-down_revision: Union[str, Sequence[str], None] = 'c3a1f5e7d9b2'
+down_revision: Union[str, Sequence[str], None] = 'g7h8i9j0k1l2'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

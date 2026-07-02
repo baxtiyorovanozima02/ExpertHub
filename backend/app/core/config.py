@@ -6,11 +6,11 @@ class Settings(BaseSettings):
     REDIS_URL: str
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
-    OPENAI_API_KEY: str = ""        # GPT-4o-mini
-    ANTHROPIC_API_KEY: str = ""     # Claude (fallback)
-    GEMINI_API_KEY: str = ""        # Gemini (fallback)
+    OPENAI_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
 
     PRIMARY_LLM: str = "openai"
 

@@ -76,7 +76,7 @@ def split_text_into_chunks(
         chunks.append(current.strip())
 
     return chunks
-
+    
 
 def _find_sentence_boundary(text: str, start: int, end: int) -> int:
     """
