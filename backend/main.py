@@ -6,7 +6,7 @@ from app.api.experts import router as experts_router
 from app.api.expert_documents import router as expert_documents_router
 from app.api.admin import router as admin_router
 from app.api.chat import router as chat_router
-from app.api.speech import router as speech_router
+from app.api.voice import router as voice_router
 
 app = FastAPI(title="ExpertHub API", version="1.0.0", debug=True)
 
@@ -24,7 +24,7 @@ app.include_router(experts_router)
 app.include_router(expert_documents_router)
 app.include_router(admin_router)
 app.include_router(chat_router)
-app.include_router(speech_router)
+app.include_router(voice_router)
 
 @app.get("/")
 def root():
