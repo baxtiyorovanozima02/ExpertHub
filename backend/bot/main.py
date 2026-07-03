@@ -1,3 +1,4 @@
+import io
 import logging
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -9,6 +10,7 @@ from app.models.category import Category
 from app.models.user import User, UserRole
 from app.models.expert_document import ExpertDocument
 from app.ai.tasks import generate_document_embedding_task
+from app.services.yandex_speech import speech_to_text, text_to_speech, YandexSpeechError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,6 +33,8 @@ DEFAULT_CATEGORIES = [
     ("🔬 Ilmiy tadqiqotchi",   "Fan"),
 ]
 
+
+VOICE_INPUT_FLAG = "_voice_reply_needed"
 
 
 def get_or_create_bot_user(db: Session, telegram_id: int, full_name: str) -> int:
@@ -98,6 +102,22 @@ def category_inline_keyboard(db: Session) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+async def respond(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
+    """
+    update.message.reply_text ning o'rnini bosuvchi yordamchi funksiya.
+    Agar joriy so'rov ovozli xabardan kelgan bo'lsa (VOICE_INPUT_FLAG), matn
+    bilan birga Yandex TTS orqali ovozli javob ham yuboriladi.
+    """
+    await update.message.reply_text(text, reply_markup=reply_markup)
+
+    if context.user_data.get(VOICE_INPUT_FLAG):
+        try:
+            audio_bytes = await text_to_speech(text)
+            await update.message.reply_voice(voice=io.BytesIO(audio_bytes))
+        except YandexSpeechError as exc:
+            logger.warning("TTS orqali ovozli javob yuborilmadi: %s", exc)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
 
@@ -128,15 +148,62 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Oddiy matnli xabarlar uchun kirish nuqtasi."""
     telegram_id = update.effective_user.id
     text = update.message.text
+    await process_text_message(update, context, telegram_id, text)
+
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Ovozli xabarlar uchun kirish nuqtasi.
+    Telegram voice notelar OggOpus formatida keladi va Yandex STT bu
+    formatni to'g'ridan-to'g'ri (konvertatsiyasiz) qabul qiladi.
+    """
+    telegram_id = update.effective_user.id
+
+    tg_file = await context.bot.get_file(update.message.voice.file_id)
+    audio_bytes = bytes(await tg_file.download_as_bytearray())
+
+    try:
+        recognized_text = await speech_to_text(audio_bytes, audio_format="oggopus")
+    except YandexSpeechError as exc:
+        logger.warning("Yandex STT xatoligi: %s", exc)
+        await update.message.reply_text(
+            "❌ Ovozli xabarni tanib bo'lmadi. Iltimos, matn shaklida yuboring "
+            "yoki birozdan so'ng qayta urinib ko'ring."
+        )
+        return
+
+    if not recognized_text.strip():
+        await update.message.reply_text(
+            "❌ Ovozdan matn aniqlanmadi. Iltimos, aniqroq talaffuz bilan qayta yuboring."
+        )
+        return
+
+    await update.message.reply_text(f"🎙 Aniqlangan matn: \"{recognized_text}\"")
+
+    context.user_data[VOICE_INPUT_FLAG] = True
+    try:
+        await process_text_message(update, context, telegram_id, recognized_text)
+    finally:
+        context.user_data.pop(VOICE_INPUT_FLAG, None)
+
+
+async def process_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE, telegram_id: int, text: str):
+    """
+    Matnli va ovozdan tanib olingan xabarlar uchun umumiy ishlov berish logikasi.
+    (Ilgari handle_message ichida bo'lgan barcha logika shu yerga ko'chirildi,
+    faqat reply_text chaqiruvlari respond() bilan almashtirildi — shunda
+    ovozli kirish uchun javob ham ovozda qaytariladi.)
+    """
     db = get_db()
 
 
     if text == BTN_BACK:
         context.user_data.clear()
         db.close()
-        await update.message.reply_text("Asosiy menyu:", reply_markup=main_keyboard())
+        await respond(update, context, "Asosiy menyu:", reply_markup=main_keyboard())
         return
 
     if context.user_data.get("awaiting_name"):
@@ -144,7 +211,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if existing:
             db.close()
             context.user_data.clear()
-            await update.message.reply_text(
+            await respond(
+                update, context,
                 "Siz allaqachon ro'yxatdan o'tgansiz!",
                 reply_markup=main_keyboard()
             )
@@ -154,7 +222,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["pending_name"] = text
         context.user_data["awaiting_category"] = True
 
-        await update.message.reply_text(
+        await respond(
+            update, context,
             f"Rahmat, {text}! 👋\n\n"
             "Endi kasb yo'nalishingizni tanlang:",
             reply_markup=ReplyKeyboardRemove()
@@ -170,11 +239,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         expert = db.query(Expert).filter(Expert.telegram_id == telegram_id).first()
         db.close()
         if not expert:
-            await update.message.reply_text("Avval ro'yxatdan o'ting: /start")
+            await respond(update, context, "Avval ro'yxatdan o'ting: /start")
             return
         context.user_data["adding_info"] = True
-        await update.message.reply_text(
-            "📝 Ma'lumotingizni yuboring:\n\n"
+        await respond(
+            update, context,
+            "📝 Ma'lumotingizni yuboring (matn yoki ovozli xabar sifatida):\n\n"
             "(Bekor qilish uchun ⬅️ Orqaga tugmasini bosing)",
             reply_markup=back_keyboard()
         )
@@ -184,7 +254,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         expert = db.query(Expert).filter(Expert.telegram_id == telegram_id).first()
         if not expert:
             db.close()
-            await update.message.reply_text("Avval ro'yxatdan o'ting: /start")
+            await respond(update, context, "Avval ro'yxatdan o'ting: /start")
             return
         docs = db.query(ExpertDocument).filter(ExpertDocument.expert_id == expert.id).all()
         cat_label = ""
@@ -195,7 +265,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
         if not docs:
-            await update.message.reply_text(
+            await respond(
+                update, context,
                 f"📂 {expert.full_name}{cat_label} ning hujjatlari:\n\n"
                 "Hozircha hech qanday ma'lumot kiritilmagan.",
                 reply_markup=main_keyboard()
@@ -206,20 +277,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for doc in docs:
             preview = doc.content[:80] + "..." if len(doc.content) > 80 else doc.content
             result += f"🔹 #{doc.id}: {preview}\n\n"
-        await update.message.reply_text(result, reply_markup=main_keyboard())
+        await respond(update, context, result, reply_markup=main_keyboard())
         return
 
     if text == BTN_DEL:
         expert = db.query(Expert).filter(Expert.telegram_id == telegram_id).first()
         if not expert:
             db.close()
-            await update.message.reply_text("Avval ro'yxatdan o'ting: /start")
+            await respond(update, context, "Avval ro'yxatdan o'ting: /start")
             return
         docs = db.query(ExpertDocument).filter(ExpertDocument.expert_id == expert.id).all()
         db.close()
 
         if not docs:
-            await update.message.reply_text(
+            await respond(
+                update, context,
                 "O'chirish uchun hech qanday ma'lumot yo'q.",
                 reply_markup=main_keyboard()
             )
@@ -230,14 +302,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             preview = doc.content[:60] + "..." if len(doc.content) > 60 else doc.content
             result += f"#{doc.id}: {preview}\n"
         context.user_data["deleting_doc"] = True
-        await update.message.reply_text(result, reply_markup=back_keyboard())
+        await respond(update, context, result, reply_markup=back_keyboard())
         return
 
     if text == BTN_CAT:
         expert = db.query(Expert).filter(Expert.telegram_id == telegram_id).first()
         if not expert:
             db.close()
-            await update.message.reply_text("Avval ro'yxatdan o'ting: /start")
+            await respond(update, context, "Avval ro'yxatdan o'ting: /start")
             return
 
         current_label = "Belgilanmagan"
@@ -249,7 +321,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting_category"] = True
         context.user_data["pending_name"] = expert.full_name
         context.user_data["changing_category"] = True
-        await update.message.reply_text(
+        await respond(
+            update, context,
             f"Hozirgi kasb yo'nalishingiz: {current_label}\n\n"
             "Yangi kasb yo'nalishini tanlang:",
             reply_markup=ReplyKeyboardRemove()
@@ -267,7 +340,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not expert:
             db.close()
             context.user_data.clear()
-            await update.message.reply_text("Avval ro'yxatdan o'ting: /start")
+            await respond(update, context, "Avval ro'yxatdan o'ting: /start")
             return
         doc = ExpertDocument(expert_id=expert.id, content=text, source="telegram_bot")
         db.add(doc)
@@ -277,7 +350,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
         generate_document_embedding_task.delay(doc_id)
         context.user_data.clear()
-        await update.message.reply_text(
+        await respond(
+            update, context,
             "✅ Ma'lumot saqlandi!",
             reply_markup=main_keyboard()
         )
@@ -289,7 +363,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not expert:
             db.close()
             context.user_data.clear()
-            await update.message.reply_text("Avval ro'yxatdan o'ting: /start")
+            await respond(update, context, "Avval ro'yxatdan o'ting: /start")
             return
 
         try:
@@ -303,26 +377,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 db.commit()
                 db.close()
                 context.user_data.clear()
-                await update.message.reply_text(
+                await respond(
+                    update, context,
                     f"🗑 #{doc_id} raqamli ma'lumot o'chirildi.",
                     reply_markup=main_keyboard()
                 )
             else:
                 db.close()
-                await update.message.reply_text(
+                await respond(
+                    update, context,
                     "❌ Bunday raqamli ma'lumot topilmadi.",
                     reply_markup=back_keyboard()
                 )
         except ValueError:
             db.close()
-            await update.message.reply_text(
+            await respond(
+                update, context,
                 "Iltimos, faqat raqam yuboring.",
                 reply_markup=back_keyboard()
             )
         return
 
     db.close()
-    await update.message.reply_text(
+    await respond(
+        update, context,
         "Quyidagi tugmalardan foydalaning:",
         reply_markup=main_keyboard()
     )
@@ -407,6 +485,7 @@ def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(category_callback, pattern="^cat"))
+    application.add_handler(MessageHandler(filters.VOICE, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logger.info("Bot ishga tushdi...")
