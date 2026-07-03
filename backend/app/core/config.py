@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     YANDEX_API_KEY: str = ""
     YANDEX_FOLDER_ID: str = ""
 
+    YANDEX_STT_LANG: str = "uz-UZ"
+    YANDEX_TTS_LANG: str = "uz-UZ"
+    YANDEX_TTS_VOICE: str = "madi"
+
     class Config:
         env_file = ".env"
 
