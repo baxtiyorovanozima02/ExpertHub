@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -19,20 +21,28 @@ RUN curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-stati
 COPY constraints.txt /constraints.txt
 ENV PIP_CONSTRAINT=/constraints.txt
 
-RUN pip install --no-cache-dir --upgrade pip
-RUN pip install --no-cache-dir "setuptools<81" wheel
 
-RUN pip install --no-cache-dir \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install "setuptools<81" wheel
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
     torch==2.4.1 \
     torchaudio==2.4.1 \
     --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
     --timeout=120 \
     --retries=5 \
     -r requirements.txt
+
+ENV HF_HOME=/root/.cache/huggingface
 
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')"
 
