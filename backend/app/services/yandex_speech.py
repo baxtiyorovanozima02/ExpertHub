@@ -1,159 +1,131 @@
 # app/services/yandex_speech.py
 """
-Yandex SpeechKit orqali Speech-to-Text (STT) va Text-to-Speech (TTS) xizmatlari.
+Yandex SpeechKit orqali nutqni matnga (STT) va matnni nutqqa (TTS)
+aylantiruvchi xizmat qatlami.
 
-Hujjat: https://cloud.yandex.com/en/docs/speechkit/
-Autentifikatsiya: Api-Key (YANDEX_API_KEY), papka: YANDEX_FOLDER_ID.
+Kerakli .env sozlamalari (app/core/config.py da allaqachon mavjud):
+    YANDEX_API_KEY   - Yandex Cloud API kaliti (Api-Key ...)
+    YANDEX_FOLDER_ID - Yandex Cloud folder ID
+
+Qo'shimcha ixtiyoriy sozlamalar (config.py ga qo'shildi):
+    YANDEX_STT_LANG  - tanib olish tili (default: "uz-UZ")
+    YANDEX_TTS_LANG  - ovozlashtirish tili (default: "uz-UZ")
+    YANDEX_TTS_VOICE - ovoz (default: "madi", uz-UZ uchun mos ovozlardan biri)
+
+Eslatma: Yandex SpeechKit "short audio" recognize endpointi <= 1 daqiqa va
+<= 1MB hajmdagi audio uchun mos keladi (Telegram ovozli xabarlar odatda
+shu chegaraga to'g'ri keladi va OggOpus formatida keladi, shuning uchun
+formatni o'zgartirmasdan to'g'ridan-to'g'ri yuborsa bo'ladi).
 """
+
+import logging
+
 import httpx
-from fastapi import HTTPException
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 STT_URL = "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
 TTS_URL = "https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize"
 
-MAX_STT_FILE_SIZE = 1 * 1024 * 1024  # 1 MB
 
-ALLOWED_TTS_FORMATS = {"oggopus", "lpcm", "mp3"}
-DEFAULT_VOICE = "alena"
+class YandexSpeechError(Exception):
+    """Yandex SpeechKit bilan bog'liq xatoliklar uchun umumiy exception."""
 
 
-def _check_credentials() -> None:
-    if not settings.YANDEX_API_KEY or not settings.YANDEX_FOLDER_ID:
-        raise HTTPException(
-            status_code=500,
-            detail="Yandex SpeechKit sozlanmagan: YANDEX_API_KEY / YANDEX_FOLDER_ID kerak",
+def _auth_header() -> dict:
+    if not settings.YANDEX_API_KEY:
+        raise YandexSpeechError(
+            "YANDEX_API_KEY sozlanmagan. .env faylga YANDEX_API_KEY va "
+            "YANDEX_FOLDER_ID qiymatlarini qo'shing."
         )
-
-
-def _auth_headers() -> dict:
     return {"Authorization": f"Api-Key {settings.YANDEX_API_KEY}"}
 
 
-def speech_to_text(
+async def speech_to_text(
     audio_bytes: bytes,
-    lang: str = "uz-UZ",
     audio_format: str = "oggopus",
-    sample_rate_hertz: int = 48000,
+    lang: str | None = None,
+    sample_rate_hertz: int | None = None,
 ) -> str:
     """
-    Audio baytlarni matnga aylantiradi (Yandex STT, sinxron/short-audio API).
+    Audio baytlarni (ogg/opus, lpcm yoki mp3) matnga aylantiradi.
 
-    :param audio_bytes: audio faylning xom (raw) baytlari (masalan .ogg/.oga - OggOpus,
-        yoki .wav - lpcm formatga mos bo'lishi kerak)
-    :param lang: tan olish tili, masalan "uz-UZ", "ru-RU", "en-US"
-    :param audio_format: "oggopus" (standart) yoki "lpcm"
-    :param sample_rate_hertz: faqat format="lpcm" bo'lganda ishlatiladi (8000/16000/48000)
-    :return: tan olingan matn
+    audio_format: "oggopus" (Telegram ovozli xabarlar uchun standart),
+                  "lpcm" yoki "mp3" ham qo'llab-quvvatlanadi.
     """
-    _check_credentials()
-
     if not audio_bytes:
-        raise HTTPException(status_code=400, detail="Audio fayl bo'sh")
-
-    if len(audio_bytes) > MAX_STT_FILE_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Audio fayl juda katta (max 1MB, ~30 soniya). "
-                "Uzunroq audio uchun boshqa (asinxron) API kerak bo'ladi."
-            ),
-        )
+        raise YandexSpeechError("Audio ma'lumot bo'sh.")
 
     params = {
         "folderId": settings.YANDEX_FOLDER_ID,
-        "lang": lang,
+        "lang": lang or settings.YANDEX_STT_LANG,
         "format": audio_format,
     }
-    if audio_format == "lpcm":
+    if audio_format == "lpcm" and sample_rate_hertz:
         params["sampleRateHertz"] = str(sample_rate_hertz)
 
-    try:
-        response = httpx.post(
-            STT_URL,
-            params=params,
-            headers=_auth_headers(),
-            content=audio_bytes,
-            timeout=30.0,
-        )
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Yandex STT so'roviga ulanib bo'lmadi: {exc}")
-
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Yandex STT xatolik qaytardi ({response.status_code}): {response.text}",
-        )
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.post(
+                STT_URL,
+                params=params,
+                headers=_auth_header(),
+                content=audio_bytes,
+            )
+        except httpx.HTTPError as exc:
+            logger.exception("Yandex STT so'roviga ulanishda xatolik")
+            raise YandexSpeechError(f"Yandex STT ga ulanib bo'lmadi: {exc}") from exc
 
     data = response.json()
-    if data.get("error_code"):
-        raise HTTPException(
-            status_code=502,
-            detail=f"Yandex STT xatolik: {data.get('error_message', data.get('error_code'))}",
-        )
 
-    return data.get("result", "")
+    if response.status_code != 200 or "result" not in data:
+        error_message = data.get("error_message") or data.get("message") or str(data)
+        logger.error("Yandex STT xatoligi (%s): %s", response.status_code, error_message)
+        raise YandexSpeechError(f"Yandex STT xatoligi: {error_message}")
+
+    return data["result"]
 
 
-def text_to_speech(
+async def text_to_speech(
     text: str,
-    lang: str = "uz-UZ",
-    voice: str = DEFAULT_VOICE,
+    voice: str | None = None,
+    lang: str | None = None,
     audio_format: str = "oggopus",
-    sample_rate_hertz: int = 48000,
     speed: float = 1.0,
 ) -> bytes:
     """
-    Matnni ovozga aylantiradi (Yandex TTS).
-
-    :param text: ovozga aylantiriladigan matn (maksimum 5000 belgi)
-    :param lang: til, masalan "uz-UZ", "ru-RU", "en-US"
-    :param voice: ovoz nomi (masalan "alena", "filipp", "jane")
-    :param audio_format: "oggopus" (standart), "lpcm" yoki "mp3"
-    :param sample_rate_hertz: faqat format="lpcm" bo'lganda ishlatiladi
-    :param speed: nutq tezligi (0.1 - 3.0 oralig'ida, standart 1.0)
-    :return: sintez qilingan audioning xom (raw) baytlari
+    Matnni ovozli audio (bytes) ga aylantiradi. Natija OggOpus formatida
+    qaytariladi (Telegramga to'g'ridan-to'g'ri voice sifatida yuborish mumkin).
     """
-    _check_credentials()
-
     if not text or not text.strip():
-        raise HTTPException(status_code=400, detail="Matn bo'sh bo'lishi mumkin emas")
+        raise YandexSpeechError("Ovozlashtirish uchun matn bo'sh bo'lmasligi kerak.")
 
-    if len(text) > 5000:
-        raise HTTPException(status_code=400, detail="Matn juda uzun (maksimum 5000 belgi)")
-
-    if audio_format not in ALLOWED_TTS_FORMATS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Noto'g'ri format: {audio_format}. Ruxsat etilganlar: {sorted(ALLOWED_TTS_FORMATS)}",
-        )
+    text = text[:4900]
 
     data = {
         "text": text,
-        "lang": lang,
-        "voice": voice,
-        "folderId": settings.YANDEX_FOLDER_ID,
+        "lang": lang or settings.YANDEX_TTS_LANG,
+        "voice": voice or settings.YANDEX_TTS_VOICE,
         "format": audio_format,
+        "folderId": settings.YANDEX_FOLDER_ID,
         "speed": str(speed),
     }
-    if audio_format == "lpcm":
-        data["sampleRateHertz"] = str(sample_rate_hertz)
 
-    try:
-        response = httpx.post(
-            TTS_URL,
-            data=data,
-            headers=_auth_headers(),
-            timeout=30.0,
-        )
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Yandex TTS so'roviga ulanib bo'lmadi: {exc}")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.post(TTS_URL, headers=_auth_header(), data=data)
+        except httpx.HTTPError as exc:
+            logger.exception("Yandex TTS so'roviga ulanishda xatolik")
+            raise YandexSpeechError(f"Yandex TTS ga ulanib bo'lmadi: {exc}") from exc
 
     if response.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Yandex TTS xatolik qaytardi ({response.status_code}): {response.text}",
-        )
+        try:
+            error_message = response.json().get("error_message", response.text)
+        except Exception:
+            error_message = response.text
+        logger.error("Yandex TTS xatoligi (%s): %s", response.status_code, error_message)
+        raise YandexSpeechError(f"Yandex TTS xatoligi: {error_message}")
 
     return response.content
