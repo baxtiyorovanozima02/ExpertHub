@@ -1,4 +1,3 @@
-# app/schemas/speech.py
 from pydantic import BaseModel, field_validator
 
 
@@ -10,7 +9,7 @@ class SpeechToTextOut(BaseModel):
 class TextToSpeechIn(BaseModel):
     text: str
     lang: str = "uz-UZ"
-    voice: str = "alena"
+    voice: str = "nigora"  # o'zbek tili uchun rasmiy ovoz (avval "alena" - rus ovozi edi)
     format: str = "oggopus"
     speed: float = 1.0
 

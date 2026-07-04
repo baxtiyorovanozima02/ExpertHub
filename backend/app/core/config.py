@@ -32,8 +32,9 @@ class Settings(BaseSettings):
 
 
     YANDEX_STT_LANG: str = "uz-UZ"
+
     YANDEX_TTS_LANG: str = "uz-UZ"
-    YANDEX_TTS_VOICE: str = "madi"
+    YANDEX_TTS_VOICE: str = "nigora"
 
 
     HYBRID_SEARCH_ENABLED: bool = True

@@ -1,0 +1,47 @@
+[33mbd75a5a[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m HEAD@{0}: reset: moving to HEAD@{1}
+[33m11def1b[m HEAD@{1}: commit: Yandex STT/TTS integratsiyasi qo'shildi
+[33mbd75a5a[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m HEAD@{2}: commit: fix: model yuklab olish uchun cache mount o'rniga image ichiga baking qilish
+[33m364c992[m HEAD@{3}: commit: fix: resolve langchain-core / langchain-google-genai version conflict
+[33m88c497c[m HEAD@{4}: commit: feat: add HYBRID_SEARCH_ENABLED setting
+[33m58786b3[m HEAD@{5}: commit: feat: hybrid search — fuse vector and keyword results via RRF
+[33ma151a15[m HEAD@{6}: commit: feat: add keyword (full-text) search for hybrid retrieval
+[33m0c6ded3[m HEAD@{7}: commit: feat: register voice router in FastAPI app
+[33mf077edb[m HEAD@{8}: commit: feat: telegram bot voice message support (STT input, TTS reply)
+[33m8a63fff[m HEAD@{9}: commit: feat: add Yandex STT/TTS settings (lang, voice)
+[33mb3f3cff[m HEAD@{10}: commit: feat: add /api/voice endpoints (stt, tts, voice-message)
+[33me0cf2a8[m HEAD@{11}: commit: feat: add Yandex SpeechKit STT/TTS service
+[33mf3dba48[m HEAD@{12}: commit: Yandex STT/TTS integratsiyasi qo'shildi
+[33m1384d8c[m HEAD@{13}: commit: fix: switch to Gemini 2.5 Flash (gemini-1.5-flash deprecated)
+[33m3093a0c[m HEAD@{14}: commit: chore: keraksiz fayllarni gitignore qilish va repodan olib tashlash
+[33m5bf7143[m HEAD@{15}: commit: fix: created_at default, migratsiyalar va boshqa tuzatishlar
+[33m1961625[m HEAD@{16}: commit: fix: expert_documents.created_at default qiymati tuzatildi
+[33mb033f47[m HEAD@{17}: commit: fix: expert_documents.created_at default qiymatini tuzatish
+[33m3b38581[m HEAD@{18}: commit: fix: experts yaratish/yangilashda category_id validatsiyasi qo'shildi (500 xatolikni oldini olish)
+[33m68781af[m HEAD@{19}: commit: fix: experts.py ga autentifikatsiya va egalik tekshiruvi qo'shildi (xavfsizlik zaifligi)
+[33mdb238b3[m HEAD@{20}: commit: fix: Swagger Authorize uchun HTTPBearer sxemasiga o'tkazildi
+[33mf38505e[m HEAD@{21}: commit: fix: celery worker, qdrant env va alembic auto-migration qo'shildi
+[33mc66ad61[m HEAD@{22}: commit: Fix Dockerfile: remove resolv.conf hack, DNS fixed via Docker Desktop settings
+[33m68e9704[m HEAD@{23}: commit: fix: correct login redirect path from /login to /auth/login
+[33mc173762[m HEAD@{24}: commit: feat: add wow animations and effects to dashboard and chat (glow, shimmer, entrance animations)
+[33ma438481[m HEAD@{25}: commit: feat: add fallback LLM router (OpenAI/Claude/Gemini) and Yandex STT/TTS integration
+[33ma933988[m HEAD@{26}: commit: feat: add conversation summarization (#6) and feedback system (#7)
+[33ma3c5f9c[m HEAD@{27}: commit: feat(rag): query expansion, chunk source tracking, multi-language support
+[33mda9753c[m HEAD@{28}: commit: feat(docs): real-time status tracking (SSE stream, polling, retry)
+[33m7139fbc[m HEAD@{29}: commit: feat(chat): conversation history, search va history page endpointlari
+[33mbb7a8c3[m HEAD@{30}: commit: feat: conversation history in RAG + history page endpoints (list, search, delete, rename)
+[33m0e92d83[m HEAD@{31}: commit: feat: reranking, improved prompt, streaming chat endpoint
+[33m0952ece[m HEAD@{32}: commit: feat: sentence boundary chunking for better RAG quality
+[33m06cdc4b[m HEAD@{33}: commit: feat: support all file types in RAG parser
+[33mc1d6bbe[m HEAD@{34}: commit: feat: support all file types in RAG (pptx, epub, html, json, xml, rtf, tsv)
+[33m35cfce7[m HEAD@{35}: commit: fix: ExpertDocument modeliga parse_status/parse_error ustunlari qo'shildi, qdrant_client import tuzatildi, yangi testlar qo'shildi
+[33mdd4415f[m HEAD@{36}: commit: feat: categories, chat va admin API uchun testlar qo'shildi
+[33m0a8e631[m HEAD@{37}: commit: test: expert_documents, rag/search va chunking/embeddings uchun testlar qo'shildi
+[33m164db01[m HEAD@{38}: commit: test: auth service, auth api va experts api uchun testlar qo'shildi
+[33m68b8e79[m HEAD@{39}: commit: feat: hujjat centroidlari orqali ikki bosqichli tezkor qidiruv qoshildi
+[33m36896f8[m HEAD@{40}: commit: fix: Fraunces font axes xatoligi tuzatildi
+[33m14f8116[m HEAD@{41}: commit: feat: chat va admin komponentlari yangilandi
+[33m5ee0433[m HEAD@{42}: commit: feat: admin layout, statistika va ekspertlar sahifalari yangilandi
+[33m0f3b9f0[m HEAD@{43}: commit: feat: login, register va dashboard sahifalari yangilandi
+[33m8a074f2[m HEAD@{44}: commit: style: globals, root layout va auth layout yangilandi
+[33m289e72a[m HEAD@{45}: Branch: renamed refs/heads/newbranch to refs/heads/main
+[33m289e72a[m HEAD@{47}: commit (initial): feat: initial clean commit
