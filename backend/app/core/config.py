@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     YANDEX_TTS_LANG: str = "uz-UZ"
     YANDEX_TTS_VOICE: str = "nigora"
 
+    YANDEX_TTS_MAX_CHUNK_CHARS: int = 350
+
 
     HYBRID_SEARCH_ENABLED: bool = True
 
