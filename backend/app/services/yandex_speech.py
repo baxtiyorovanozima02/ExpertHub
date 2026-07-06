@@ -86,6 +86,74 @@ class YandexSpeechError(Exception):
     """Yandex SpeechKit bilan bog'liq xatoliklar uchun umumiy exception."""
 
 
+_MAX_ERROR_MESSAGE_CHARS = 300
+
+
+def _short_error_message(exc: Exception) -> str:
+    message = str(exc)
+    if len(message) > _MAX_ERROR_MESSAGE_CHARS:
+        message = message[:_MAX_ERROR_MESSAGE_CHARS].rstrip() + "... (to'liq xato server logida)"
+    return message
+
+
+def _sniff_audio_format(audio_bytes: bytes) -> str | None:
+    head = audio_bytes[:16]
+    if head.startswith(b"OggS"):
+        return "ogg"
+    if head.startswith(b"RIFF"):
+        return "wav"
+    if head[4:8] == b"ftyp":
+        return "mp4"
+    if head.startswith(b"ID3") or (len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0):
+        return "mp3"
+    return None
+
+
+def _load_audio_segment(audio_bytes: bytes, expected_pydub_format: str) -> AudioSegment:
+    try:
+        return AudioSegment.from_file(io.BytesIO(audio_bytes), format=expected_pydub_format)
+    except Exception as first_exc:
+        logger.warning(
+            "Audio '%s' formatida ochilmadi, muqobil formatlarni sinab ko'ramiz: %s",
+            expected_pydub_format, _short_error_message(first_exc),
+        )
+        sniffed = _sniff_audio_format(audio_bytes)
+        if sniffed and sniffed != expected_pydub_format:
+            try:
+                return AudioSegment.from_file(io.BytesIO(audio_bytes), format=sniffed)
+            except Exception:
+                pass
+        try:
+            return AudioSegment.from_file(io.BytesIO(audio_bytes))
+        except Exception:
+            raise first_exc
+
+
+def _export_oggopus(segment: AudioSegment) -> bytes:
+    """AudioSegment'ni Yandex STT har doim qabul qiladigan OggOpus formatiga eksport qiladi."""
+    out = io.BytesIO()
+    segment.export(out, format="ogg", codec="libopus")
+    return out.getvalue()
+
+
+def _normalize_audio_for_stt(audio_bytes: bytes, guessed_format: str) -> bytes:
+    """
+    Yandex STT v1 recognize endpointi ba'zi formatlarni (masalan mp3) doim
+    ham qabul qilavermaydi ("Invalid audio format: mp3" xatoligi shundan
+    kelib chiqadi). Shuning uchun, agar audio allaqachon haqiqiy OggOpus
+    bo'lmasa, uni ffmpeg/pydub orqali OggOpus'ga aylantiramiz va shu holda
+    Yandex'ga yuboramiz. Bu deyarli barcha manba formatlarini (mp3, wav,
+    webm, m4a/aac) qamrab oladi, chunki ffmpeg ularning barchasini decode
+    qila oladi, OggOpus esa Yandex tomonidan har doim qo'llab-quvvatlanadi.
+    """
+    if guessed_format == "oggopus" and _sniff_audio_format(audio_bytes) in (None, "ogg"):
+        return audio_bytes
+
+    pydub_format = _PYDUB_FORMAT_NAMES.get(guessed_format, guessed_format)
+    segment = _load_audio_segment(audio_bytes, pydub_format)
+    return _export_oggopus(segment)
+
+
 def get_voice_for_lang(lang: str | None) -> str:
     """
     Aniqlangan javob tiliga ('uz' | 'ru' | 'en') mos Yandex TTS ovozini
@@ -189,7 +257,7 @@ def _split_audio_into_chunks(
     bu jarayon rekursiv ravishda hajm yetarlicha kichik bo'lguncha davom
     etadi.
     """
-    audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format=pydub_format)
+    audio = _load_audio_segment(audio_bytes, pydub_format)
     total_ms = len(audio)
     chunk_ms = chunk_seconds * 1000
 
@@ -251,6 +319,19 @@ async def speech_to_text_long(
     if not audio_bytes:
         raise YandexSpeechError("Audio ma'lumot bo'sh.")
 
+
+    try:
+        audio_bytes = await asyncio.to_thread(
+            _normalize_audio_for_stt, audio_bytes, audio_format
+        )
+    except Exception as exc:
+        logger.exception("Audioni OggOpus'ga normallashtirishda xatolik")
+        raise YandexSpeechError(
+            f"Audio faylni qayta ishlab bo'lmadi (format noto'g'ri yoki fayl buzilgan): "
+            f"{_short_error_message(exc)}"
+        ) from exc
+    audio_format = "oggopus"
+
     is_small_enough = len(audio_bytes) <= STT_MAX_CHUNK_BYTES
 
     pydub_format = _PYDUB_FORMAT_NAMES.get(audio_format, "ogg")
@@ -258,9 +339,7 @@ async def speech_to_text_long(
     if is_small_enough:
         try:
             duration_ms = len(
-                await asyncio.to_thread(
-                    AudioSegment.from_file, io.BytesIO(audio_bytes), pydub_format
-                )
+                await asyncio.to_thread(_load_audio_segment, audio_bytes, pydub_format)
             )
         except Exception:
             duration_ms = None
@@ -279,7 +358,10 @@ async def speech_to_text_long(
         )
     except Exception as exc:
         logger.exception("Audio bo'laklarga bo'lishda xatolik")
-        raise YandexSpeechError(f"Audio faylni qayta ishlab bo'lmadi: {exc}") from exc
+        raise YandexSpeechError(
+            f"Audio faylni qayta ishlab bo'lmadi (format noto'g'ri yoki fayl buzilgan): "
+            f"{_short_error_message(exc)}"
+        ) from exc
 
     if not chunks:
         raise YandexSpeechError("Audio bo'sh yoki noto'g'ri formatda.")
