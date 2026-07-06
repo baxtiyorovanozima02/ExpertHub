@@ -1,31 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import io
-import uuid
 
 from app.core.database import get_db
-from app.core.storage import upload_file, get_file_url
 from app.models.user import User
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services.auth import get_current_user
 from app.services.yandex_speech import (
-    speech_to_text,
+    speech_to_text_long as speech_to_text,
     text_to_speech,
     get_voice_for_lang,
     YandexSpeechError,
 )
 from app.ai.rag import generate_answer, generate_conversation_title
 from app.ai.query_preprocessor import detect_language
-
-
-def _build_tts_object_name(user_id: int) -> str:
-    """
-    TTS orqali hosil bo'lgan audio fayl uchun MinIO ichidagi unikal
-    yo'l hosil qiladi, masalan: tts/7/3f1c9e2a....ogg
-    """
-    return f"tts/{user_id}/{uuid.uuid4().hex}.ogg"
-
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
 
@@ -74,34 +64,18 @@ async def text_to_voice(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Matnni ovozga aylantiradi, hosil bo'lgan audio faylni serverda
-    (MinIO'da) saqlaydi va faylga havola (URL) qaytaradi.
-
-    Frontend/mobil ilova javobdagi `audio_url` orqali audio faylni
-    to'g'ridan-to'g'ri ochishi yoki <audio> elementida ijro etishi mumkin -
-    brauzer avtomatik "yuklab olish" oynasini ko'rsatmaydi.
+    Matnni ovozga aylantirib, OggOpus audio oqimi sifatida qaytaradi.
     """
     try:
         audio_bytes = await text_to_speech(text, voice=voice)
     except YandexSpeechError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
-    object_name = _build_tts_object_name(current_user.id)
-    try:
-        upload_file(
-            io.BytesIO(audio_bytes),
-            object_name,
-            length=len(audio_bytes),
-            content_type="audio/ogg",
-        )
-        audio_url = get_file_url(object_name)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-
-    return {
-        "audio_url": audio_url,
-        "content_type": "audio/ogg",
-    }
+    return StreamingResponse(
+        io.BytesIO(audio_bytes),
+        media_type="audio/ogg",
+        headers={"Content-Disposition": "attachment; filename=speech.ogg"},
+    )
 
 
 @router.post("/{conversation_id}/voice-message")

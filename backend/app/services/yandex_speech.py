@@ -58,6 +58,7 @@ Kerakli qo'shimcha kutubxonalar (requirements.txt ga qo'shildi):
 """
 
 import asyncio
+import io
 import logging
 import re
 
@@ -75,6 +76,10 @@ TTS_V3_ENDPOINT = "tts.api.cloud.yandex.net:443"
 
 
 DEFAULT_TTS_MAX_CHUNK_CHARS = 350
+
+
+STT_CHUNK_SECONDS = 50
+STT_MAX_CHUNK_BYTES = 900 * 1024
 
 
 class YandexSpeechError(Exception):
@@ -166,6 +171,140 @@ async def speech_to_text(
         raise YandexSpeechError(f"Yandex STT xatoligi: {error_message}")
 
     return data["result"]
+
+
+def _split_audio_into_chunks(
+    audio_bytes: bytes,
+    pydub_format: str,
+    chunk_seconds: int = STT_CHUNK_SECONDS,
+    max_chunk_bytes: int = STT_MAX_CHUNK_BYTES,
+) -> list[bytes]:
+    """
+    Uzun/katta audio faylni Yandex "short audio" endpointi qabul qiladigan
+    xavfsiz o'lchamdagi (<=1 daqiqa va <=1MB) bo'laklarga bo'ladi.
+
+    Avval vaqt bo'yicha (chunk_seconds) bo'linadi. Agar shunda ham bo'lak
+    hajmi max_chunk_bytes'dan katta chiqib qolsa (masalan siqilmagan wav
+    yoki yuqori bitreyt formatlar uchun), bo'lak yana ikkiga bo'linadi -
+    bu jarayon rekursiv ravishda hajm yetarlicha kichik bo'lguncha davom
+    etadi.
+    """
+    audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format=pydub_format)
+    total_ms = len(audio)
+    chunk_ms = chunk_seconds * 1000
+
+    raw_pieces: list[AudioSegment] = []
+    start = 0
+    if total_ms == 0:
+        raw_pieces = [audio]
+    else:
+        while start < total_ms:
+            raw_pieces.append(audio[start:start + chunk_ms])
+            start += chunk_ms
+
+    def _export(segment: AudioSegment) -> bytes:
+        out = io.BytesIO()
+        segment.export(out, format=pydub_format)
+        return out.getvalue()
+
+    final_chunks: list[bytes] = []
+
+    def _process(segment: AudioSegment):
+        data = _export(segment)
+        if len(data) <= max_chunk_bytes or len(segment) <= 2000:
+
+            final_chunks.append(data)
+            return
+        half = len(segment) // 2
+        _process(segment[:half])
+        _process(segment[half:])
+
+    for piece in raw_pieces:
+        _process(piece)
+
+    return final_chunks
+
+
+async def speech_to_text_long(
+    audio_bytes: bytes,
+    audio_format: str = "oggopus",
+    lang: str | None = None,
+    sample_rate_hertz: int | None = None,
+) -> str:
+    """
+    Istalgan uzunlik/hajmdagi audio faylni matnga aylantiradi.
+
+    Yandex SpeechKit'ning "short audio" recognize endpointi <=1 daqiqa va
+    <=1MB hajmdagi audio uchun mo'ljallangan bo'lib, bundan katta fayllarni
+    to'g'ridan-to'g'ri yuborish xatolikka olib keladi. Shuning uchun bu
+    funksiya:
+
+      1. Audio shu chegaradan (vaqt va hajm bo'yicha) kichik bo'lsa -
+         to'g'ridan-to'g'ri speech_to_text() ni chaqiradi (tezroq yo'l).
+      2. Aks holda audio ffmpeg/pydub yordamida xavfsiz kichik bo'laklarga
+         bo'linadi, har bir bo'lak navbat bilan Yandex STT'ga yuboriladi
+         va natijada olingan matnlar birlashtiriladi.
+
+    Shu tarzda foydalanuvchi tomonidan yuborilgan audio uzunligi yoki
+    hajmiga hech qanday sun'iy chegara qo'yilmaydi.
+    """
+    if not audio_bytes:
+        raise YandexSpeechError("Audio ma'lumot bo'sh.")
+
+    is_small_enough = len(audio_bytes) <= STT_MAX_CHUNK_BYTES
+
+    pydub_format = _PYDUB_FORMAT_NAMES.get(audio_format, "ogg")
+
+    if is_small_enough:
+        try:
+            duration_ms = len(
+                await asyncio.to_thread(
+                    AudioSegment.from_file, io.BytesIO(audio_bytes), pydub_format
+                )
+            )
+        except Exception:
+            duration_ms = None
+
+        if duration_ms is None or duration_ms <= STT_CHUNK_SECONDS * 1000:
+            return await speech_to_text(
+                audio_bytes,
+                audio_format=audio_format,
+                lang=lang,
+                sample_rate_hertz=sample_rate_hertz,
+            )
+
+    try:
+        chunks = await asyncio.to_thread(
+            _split_audio_into_chunks, audio_bytes, pydub_format
+        )
+    except Exception as exc:
+        logger.exception("Audio bo'laklarga bo'lishda xatolik")
+        raise YandexSpeechError(f"Audio faylni qayta ishlab bo'lmadi: {exc}") from exc
+
+    if not chunks:
+        raise YandexSpeechError("Audio bo'sh yoki noto'g'ri formatda.")
+
+    logger.info(
+        "Uzun audio %d bo'lakka bo'lindi (STT_CHUNK_SECONDS=%d)",
+        len(chunks), STT_CHUNK_SECONDS,
+    )
+
+    recognized_parts: list[str] = []
+    for index, chunk_bytes in enumerate(chunks, start=1):
+        try:
+            part_text = await speech_to_text(
+                chunk_bytes,
+                audio_format=audio_format,
+                lang=lang,
+                sample_rate_hertz=sample_rate_hertz,
+            )
+        except YandexSpeechError:
+            logger.error("STT bo'lagi %d/%d tanib olishda xatolik", index, len(chunks))
+            raise
+        if part_text and part_text.strip():
+            recognized_parts.append(part_text.strip())
+
+    return " ".join(recognized_parts).strip()
 
 
 _CONTAINER_AUDIO_TYPES = {
