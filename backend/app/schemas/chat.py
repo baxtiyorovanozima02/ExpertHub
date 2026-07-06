@@ -1,4 +1,3 @@
-# app/schemas/chat.py
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from datetime import datetime
@@ -43,6 +42,11 @@ class MessageOut(BaseModel):
     content: str
     feedback: Optional[int] = None
     created_at: datetime
+
+
+    answer_audio_base64: Optional[str] = None
+    answer_audio_format: Optional[str] = None
+    answer_audio_error: Optional[str] = None
 
     class Config:
         from_attributes = True
