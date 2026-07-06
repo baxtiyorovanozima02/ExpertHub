@@ -108,12 +108,33 @@ def _get_source_name(chunk: DocumentChunk, db: Session) -> str:
     return "Noma'lum manba"
 
 
-def _build_context(db: Session, question: str, category_id: Optional[int]) -> str:
+_NOT_FOUND_MESSAGES = {
+    "uz": "Berilgan hujjatlarda bu ma'lumot topilmadi.",
+    "ru": "В предоставленных документах эта информация не найдена.",
+    "en": "This information was not found in the provided documents.",
+}
+
+
+def _build_context(db: Session, question: str, category_id: Optional[int]) -> tuple[str, bool]:
+    """
+    Returns (context_text, found).
+
+    MUHIM TUZATISH: avval hech qanday tegishli chunk topilmasa ham,
+    "Tegishli ma'lumot topilmadi." matni LLM'ga kontekst sifatida
+    yuborilib, LLM baribir chaqirilardi. LLM esa promptdagi "faqat
+    kontekstdan foydalan" ko'rsatmasiga har doim ham qat'iy amal
+    qilavermaydi va o'zining umumiy bilimidan (hujjatlarga aloqasi
+    yo'q) javob to'qib chiqarishi mumkin edi — foydalanuvchi aynan
+    shuni ko'rgan ("umumiy javob qaytaradi"). Endi `found=False`
+    bo'lganda chaqiruvchi (generate_answer/_stream) LLM'ni umuman
+    chaqirmasdan, standart "topilmadi" xabarini qaytaradi — bu orqali
+    javob HAR DOIM faqat yuklangan hujjatlarga asoslanishi kafolatlanadi.
+    """
     raw_chunks = find_relevant_chunks(
         db, question, category_id=category_id, top_k=_COARSE_TOP_K
     )
     if not raw_chunks:
-        return "Tegishli ma'lumot topilmadi."
+        return "Tegishli ma'lumot topilmadi.", False
 
     best_chunks = rerank_chunks(question, raw_chunks, top_k=_RERANK_TOP_K)
 
@@ -122,7 +143,7 @@ def _build_context(db: Session, question: str, category_id: Optional[int]) -> st
         source_name = _get_source_name(chunk, db)
         parts.append(f"[{source_name}]\n{chunk.content}")
 
-    return "\n\n".join(parts)
+    return "\n\n".join(parts), True
 
 
 def _summarize_messages(messages: List[Message], lang: str) -> str:
@@ -173,7 +194,14 @@ def generate_answer(
 ) -> str:
     expanded_q   = expand_query(question, history)
     lang         = detect_language(question)
-    context      = _build_context(db, expanded_q, category_id)
+    context, found = _build_context(db, expanded_q, category_id)
+
+    if not found:
+        # Hujjatlarda tegishli ma'lumot topilmasa, LLM umuman
+        # chaqirilmaydi — shu orqali "hujjatlarga aloqasi yo'q umumiy
+        # javob" berilishining oldi butunlay olinadi.
+        return _NOT_FOUND_MESSAGES.get(lang, _NOT_FOUND_MESSAGES["uz"])
+
     chat_history = _build_history(history, lang) if history else []
     prompt       = _get_prompt(lang)
 
@@ -193,7 +221,12 @@ async def generate_answer_stream(
 ) -> AsyncIterator[str]:
     expanded_q   = expand_query(question, history)
     lang         = detect_language(question)
-    context      = _build_context(db, expanded_q, category_id)
+    context, found = _build_context(db, expanded_q, category_id)
+
+    if not found:
+        yield _NOT_FOUND_MESSAGES.get(lang, _NOT_FOUND_MESSAGES["uz"])
+        return
+
     chat_history = _build_history(history, lang) if history else []
     prompt       = _get_prompt(lang)
 
