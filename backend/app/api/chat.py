@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+import base64
 import json
 
 from app.core.database import get_db
@@ -19,6 +20,8 @@ from app.schemas.chat import (
 )
 from app.services.auth import get_current_user
 from app.ai.rag import generate_answer, generate_answer_stream, generate_conversation_title
+from app.ai.query_preprocessor import detect_language
+from app.services.yandex_speech import text_to_speech, get_voice_for_lang, YandexSpeechError
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -157,9 +160,13 @@ def delete_conversation(
 
 
 @router.post("/{conversation_id}/message", response_model=MessageOut)
-def send_message(
+async def send_message(
     conversation_id: int,
     payload: MessageCreate,
+    reply_with_audio: bool = Query(
+        False,
+        description="true bo'lsa, matn javobi bilan birga ovozli (base64) javob ham qaytariladi.",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -203,7 +210,20 @@ def send_message(
     conversation.updated_at = func.now()
     db.commit()
 
-    return assistant_message
+    result = MessageOut.model_validate(assistant_message)
+
+
+    if reply_with_audio:
+        try:
+            answer_lang = detect_language(answer_text)
+            answer_voice = get_voice_for_lang(answer_lang)
+            answer_audio_bytes = await text_to_speech(answer_text, voice=answer_voice)
+            result.answer_audio_base64 = base64.b64encode(answer_audio_bytes).decode("ascii")
+            result.answer_audio_format = "oggopus"
+        except YandexSpeechError as exc:
+            result.answer_audio_error = str(exc)
+
+    return result
 
 
 
