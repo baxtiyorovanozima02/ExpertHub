@@ -78,7 +78,8 @@ TTS_V3_ENDPOINT = "tts.api.cloud.yandex.net:443"
 DEFAULT_TTS_MAX_CHUNK_CHARS = 350
 
 
-STT_CHUNK_SECONDS = 50
+
+STT_CHUNK_SECONDS = 25
 STT_MAX_CHUNK_BYTES = 900 * 1024
 
 
@@ -337,14 +338,18 @@ async def speech_to_text_long(
     pydub_format = _PYDUB_FORMAT_NAMES.get(audio_format, "ogg")
 
     if is_small_enough:
+        duration_ms = None
         try:
             duration_ms = len(
                 await asyncio.to_thread(_load_audio_segment, audio_bytes, pydub_format)
             )
         except Exception:
-            duration_ms = None
+            logger.warning(
+                "Audio davomiyligini aniqlab bo'lmadi, xavfsizlik uchun "
+                "bo'lib-yuborish yo'liga o'tiladi"
+            )
 
-        if duration_ms is None or duration_ms <= STT_CHUNK_SECONDS * 1000:
+        if duration_ms is not None and duration_ms <= STT_CHUNK_SECONDS * 1000:
             return await speech_to_text(
                 audio_bytes,
                 audio_format=audio_format,
