@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     YANDEX_TTS_LANG: str = "uz-UZ"
     YANDEX_TTS_VOICE: str = "nigora"
 
+
+    YANDEX_TTS_VOICE_UZ: str = "nigora"
+    YANDEX_TTS_VOICE_RU: str = "filipp"
+    YANDEX_TTS_VOICE_EN: str = "john"
+
     YANDEX_TTS_MAX_CHUNK_CHARS: int = 350
 
 
