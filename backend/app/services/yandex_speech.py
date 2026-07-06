@@ -81,6 +81,26 @@ class YandexSpeechError(Exception):
     """Yandex SpeechKit bilan bog'liq xatoliklar uchun umumiy exception."""
 
 
+def get_voice_for_lang(lang: str | None) -> str:
+    """
+    Aniqlangan javob tiliga ('uz' | 'ru' | 'en') mos Yandex TTS ovozini
+    qaytaradi.
+
+    TUZATISH: avval barcha javoblar tildan qat'iy nazar
+    settings.YANDEX_TTS_VOICE ("nigora", o'zbekcha ovoz) bilan
+    o'qilardi. Endi RAG javobi qaysi tilda bo'lsa (app.ai.rag /
+    query_preprocessor.detect_language natijasi), TTS ham shu tilga
+    mos ovozdan foydalanadi. Noma'lum/bo'sh til kelsa — xavfsiz
+    default sifatida o'zbekcha ovozga qaytiladi.
+    """
+    voice_by_lang = {
+        "uz": settings.YANDEX_TTS_VOICE_UZ,
+        "ru": settings.YANDEX_TTS_VOICE_RU,
+        "en": settings.YANDEX_TTS_VOICE_EN,
+    }
+    return voice_by_lang.get((lang or "").lower(), settings.YANDEX_TTS_VOICE_UZ)
+
+
 def _auth_header() -> dict:
     if not settings.YANDEX_API_KEY:
         raise YandexSpeechError(
