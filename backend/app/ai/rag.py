@@ -1,4 +1,3 @@
-# app/ai/rag.py
 """
 RAG pipeline — Query Preprocessing, Chunk Source Tracking,
 Multi-language, Reranking, Conversation History, Streaming.
@@ -15,7 +14,7 @@ from sqlalchemy.orm import Session
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
-from app.ai.llm_router import get_llm          # ← yangi: fallback LLM
+from app.ai.llm_router import invoke_with_fallback, astream_with_fallback
 from app.ai.search import find_relevant_chunks
 from app.ai.reranking import rerank_chunks
 from app.ai.query_preprocessor import expand_query, detect_language
@@ -134,8 +133,8 @@ def _summarize_messages(messages: List[Message], lang: str) -> str:
     prompt_text = _SUMMARY_PROMPTS.get(lang, _SUMMARY_PROMPTS["uz"]).format(
         history=history_text
     )
-    llm = get_llm(streaming=False)
-    response = llm.invoke([HumanMessage(content=prompt_text)])
+    summary_prompt = ChatPromptTemplate.from_messages([("human", "{text}")])
+    response = invoke_with_fallback(summary_prompt, {"text": prompt_text})
     return response.content.strip()
 
 
@@ -178,10 +177,7 @@ def generate_answer(
     chat_history = _build_history(history, lang) if history else []
     prompt       = _get_prompt(lang)
 
-    llm   = get_llm(streaming=False)
-    chain = prompt | llm
-
-    response = chain.invoke({
+    response = invoke_with_fallback(prompt, {
         "context":  context,
         "question": question,
         "history":  chat_history,
@@ -201,16 +197,12 @@ async def generate_answer_stream(
     chat_history = _build_history(history, lang) if history else []
     prompt       = _get_prompt(lang)
 
-    llm   = get_llm(streaming=True)
-    chain = prompt | llm
-
-    async for chunk in chain.astream({
+    async for token in astream_with_fallback(prompt, {
         "context":  context,
         "question": question,
         "history":  chat_history,
     }):
-        if hasattr(chunk, "content") and chunk.content:
-            yield chunk.content
+        yield token
 
 
 def generate_conversation_title(first_question: str) -> str:
