@@ -12,6 +12,7 @@ export function useChatConversation(initialConversationId?: number) {
   const [conversationId, setConversationId] = useState<number | undefined>(initialConversationId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [categoryId, setCategoryId] = useState<number | null>(null);
+  const [replyWithAudio, setReplyWithAudio] = useState(false);
 
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
@@ -37,7 +38,7 @@ export function useChatConversation(initialConversationId?: number) {
       };
       setMessages((prev) => [...prev, optimisticUserMessage]);
 
-      const assistantMessage = await sendMessage(activeId, content);
+      const assistantMessage = await sendMessage(activeId, content, replyWithAudio);
       updateLocalConversationPreview(activeId, content.slice(0, 80));
       return assistantMessage;
     },
@@ -57,6 +58,8 @@ export function useChatConversation(initialConversationId?: number) {
     conversationId,
     categoryId,
     setCategoryId,
+    replyWithAudio,
+    setReplyWithAudio,
     messages,
     sendMutation,
     loadHistory,
