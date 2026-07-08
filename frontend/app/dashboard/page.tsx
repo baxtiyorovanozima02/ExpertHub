@@ -13,7 +13,7 @@ export default function DashboardPage() {
   const [input, setInput] = useState("");
   const [inputFocused, setInputFocused] = useState(false);
 
-  const { messages, categoryId, setCategoryId, sendMutation } = useChatConversation();
+  const { messages, categoryId, setCategoryId, replyWithAudio, setReplyWithAudio, sendMutation } = useChatConversation();
 
   if (!isReady) {
     return (
@@ -120,6 +120,22 @@ export default function DashboardPage() {
       {/* Chat area */}
       <div className="relative z-10 flex flex-1 flex-col overflow-hidden">
         <ChatWindow messages={messages} isLoading={sendMutation.isPending} />
+
+        {/* Audio javob tanlash */}
+        <div className="px-4 pt-2">
+          <label
+            className="flex items-center gap-2 text-xs max-w-4xl mx-auto"
+            style={{ color: "rgba(248,250,255,0.5)" }}
+          >
+            <input
+              type="checkbox"
+              checked={replyWithAudio}
+              onChange={(e) => setReplyWithAudio(e.target.checked)}
+              className="h-3.5 w-3.5 rounded"
+            />
+            Javobni audio (ovozli) shaklda ham olish
+          </label>
+        </div>
 
         {/* Input bar */}
         <form
