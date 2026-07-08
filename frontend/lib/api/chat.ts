@@ -1,5 +1,3 @@
-// frontend/lib/api/chat.ts
-
 import { api } from "@/lib/api-client";
 import type { Conversation, ChatMessage, ChatHistory, Category } from "@/lib/types";
 
@@ -17,11 +15,13 @@ export async function createConversation(categoryId: number | null): Promise<Con
 
 export async function sendMessage(
   conversationId: number,
-  content: string
+  content: string,
+  replyWithAudio: boolean = false
 ): Promise<ChatMessage> {
   const { data } = await api.post<ChatMessage>(
     `/api/chat/${conversationId}/message`,
-    { content }
+    { content },
+    { params: { reply_with_audio: replyWithAudio } }
   );
   return data;
 }
