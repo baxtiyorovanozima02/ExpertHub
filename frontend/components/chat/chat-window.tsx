@@ -67,6 +67,18 @@ export function ChatWindow({ messages, isLoading }: Props) {
               }`}
             >
               {msg.content}
+              {msg.answer_audio_base64 && (
+                <audio
+                  controls
+                  className="mt-2 w-full"
+                  src={`data:audio/ogg;base64,${msg.answer_audio_base64}`}
+                />
+              )}
+              {msg.answer_audio_error && (
+                <p className="mt-1 text-xs" style={{ color: "rgba(255,120,120,0.8)" }}>
+                  Audio yaratilmadi: {msg.answer_audio_error}
+                </p>
+              )}
             </div>
           </div>
         ))}
