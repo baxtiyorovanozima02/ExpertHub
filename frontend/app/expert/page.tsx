@@ -1,5 +1,3 @@
-// frontend/app/expert/page.tsx
-
 "use client";
 
 import { useState, useRef } from "react";
@@ -12,10 +10,11 @@ import {
   uploadFileDocument,
   deleteDocument,
 } from "@/lib/api/expert";
+import { createConversation, sendMessage } from "@/lib/api/chat";
 import { getApiErrorMessage } from "@/lib/api-client";
-import type { ExpertDocument } from "@/lib/types";
+import type { ExpertDocument, ChatMessage } from "@/lib/types";
 
-type Tab = "text" | "file";
+type Tab = "text" | "file" | "test";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("uz-UZ", {
@@ -37,6 +36,11 @@ export default function ExpertPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const [question, setQuestion] = useState("");
+  const [replyWithAudio, setReplyWithAudio] = useState(false);
+  const [testConversationId, setTestConversationId] = useState<number | null>(null);
+  const [answer, setAnswer] = useState<ChatMessage | null>(null);
 
   const { data: documents = [], isLoading: docsLoading } = useQuery({
     queryKey: ["expert-documents"],
@@ -75,6 +79,30 @@ export default function ExpertPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["expert-documents"] }),
     onError: (err) => setError(getApiErrorMessage(err)),
   });
+
+  const askMutation = useMutation({
+    mutationFn: async () => {
+      let convId = testConversationId;
+      if (!convId) {
+        const conversation = await createConversation(null);
+        convId = conversation.id;
+        setTestConversationId(convId);
+      }
+      return sendMessage(convId, question.trim(), replyWithAudio);
+    },
+    onSuccess: (msg) => {
+      setAnswer(msg);
+      setQuestion("");
+      setError(null);
+    },
+    onError: (err) => setError(getApiErrorMessage(err)),
+  });
+
+  function handleAskSubmit() {
+    if (!question.trim() || askMutation.isPending) return;
+    setError(null);
+    askMutation.mutate();
+  }
 
   const isPending = textMutation.isPending || fileMutation.isPending;
 
@@ -129,7 +157,7 @@ export default function ExpertPage() {
 
           {/* Tabs */}
           <div className="flex border-b border-gray-200 px-6">
-            {(["text", "file"] as Tab[]).map((t) => (
+            {(["text", "file", "test"] as Tab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => { setTab(t); setError(null); }}
@@ -139,7 +167,7 @@ export default function ExpertPage() {
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
               >
-                {t === "text" ? "Matn kiritish" : "Fayl yuklash"}
+                {t === "text" ? "Matn kiritish" : t === "file" ? "Fayl yuklash" : "Sinov (savol-javob)"}
               </button>
             ))}
           </div>
@@ -242,6 +270,68 @@ export default function ExpertPage() {
                 >
                   {fileMutation.isPending ? "Yuklanmoqda..." : "Yuklash"}
                 </button>
+              </div>
+            )}
+
+            {tab === "test" && (
+              <div className="space-y-4">
+                <p className="text-xs text-gray-500">
+                  Yuklagan hujjatlaringiz asosida savol berib sinab ko'ring. Javob
+                  faqat hujjatlarda mavjud ma'lumotga asoslanadi.
+                </p>
+
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                    Savolingiz <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    value={question}
+                    onChange={(e) => setQuestion(e.target.value)}
+                    rows={3}
+                    placeholder="Masalan: Hujjatingizda hayvonlar haqida qanday ma'lumot bor?"
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-gray-400 focus:ring-2 focus:ring-gray-100 resize-none"
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={replyWithAudio}
+                    onChange={(e) => setReplyWithAudio(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  Javobni audio (ovozli) shaklda ham olish
+                </label>
+
+                <button
+                  onClick={handleAskSubmit}
+                  disabled={!question.trim() || askMutation.isPending}
+                  className="rounded-lg bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50"
+                >
+                  {askMutation.isPending ? "So'ralmoqda..." : "Savol berish"}
+                </button>
+
+                {answer && (
+                  <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                    <p className="mb-1 text-xs font-medium text-gray-500">AI javobi</p>
+                    <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-line">
+                      {answer.content}
+                    </p>
+
+                    {answer.answer_audio_base64 && (
+                      <audio
+                        controls
+                        className="mt-3 w-full"
+                        src={`data:audio/ogg;base64,${answer.answer_audio_base64}`}
+                      />
+                    )}
+                    {answer.answer_audio_error && (
+                      <p className="mt-2 text-xs text-red-500">
+                        Audio yaratilmadi: {answer.answer_audio_error}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
