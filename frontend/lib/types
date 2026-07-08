@@ -54,6 +54,9 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   created_at: string;
+  answer_audio_base64?: string | null;
+  answer_audio_format?: string | null;
+  answer_audio_error?: string | null;
 }
 
 export interface ChatHistory {
